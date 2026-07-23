@@ -66,7 +66,8 @@ def touch(ws: Ws) -> None:
 
 async def notify_phone_count(pid: str) -> None:
     pc = pcs.get(pid)
-    if pc:
+    # aiohttp 3.9 WebSocketResponse is falsy via __len__; use identity checks.
+    if pc is not None:
         await send(pc, {"type": "phone_count", "count": len(phones.get(pid, set()))})
 
 
@@ -136,7 +137,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                     continue
 
                 old = pcs.get(pid)
-                if old and old is not ws:
+                if old is not None and old is not ws:
                     await send(old, {"type": "kicked"})
                     with contextlib.suppress(Exception):
                         await old.close()
@@ -200,6 +201,48 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
             # Lightweight keepalive from PC or phone.
             elif action == "heartbeat":
                 await send(ws, {"type": "heartbeat_ack"})
+
+            # Phone → PC slip event (HMAC opaque to relay; forward only).
+            # Additive: old clients never send this; clipboard path unchanged.
+            elif action == "slip_event":
+                if not sub_id:
+                    continue
+
+                pc = pcs.get(sub_id)
+                if pc is None:
+                    continue
+
+                await send(
+                    pc,
+                    {
+                        "type": "slip_event",
+                        "payload": msg.get("payload"),
+                        "sig": msg.get("sig", ""),
+                    },
+                )
+
+                log.info("SLIP  phone -> %s", fmt(sub_id))
+
+            # PC → phone slip ack (after PC processed the event).
+            elif action == "slip_ack":
+                if not peer_id:
+                    continue
+                event_id = msg.get("event_id")
+                if not event_id or not isinstance(event_id, str):
+                    continue
+
+                payload = json.dumps(
+                    {"type": "slip_ack", "event_id": event_id},
+                    ensure_ascii=False,
+                )
+                dead: set[Ws] = set()
+                for ph in list(phones.get(peer_id, set())):
+                    try:
+                        await ph.send_str(payload)
+                    except Exception:
+                        dead.add(ph)
+                phones[peer_id] -= dead
+                log.info("ACK   %s -> phone(s)", fmt(peer_id))
 
             # PC clipboard update
             elif action == "clip":
