@@ -25,6 +25,9 @@ const {
   readSelectDisplayValue,
   findStepTarget,
   dismissMessageBox,
+  showBusyShield,
+  hideBusyShield,
+  BUSY_SHIELD_ID,
 } = require('../engine.js');
 
 const ORDER_FIXTURE = path.join(__dirname, '..', 'fixtures', 'order_list.html');
@@ -1708,5 +1711,61 @@ describe('close-job tail after a successful Jinbao save', () => {
 
     assert.equal(result.ok, false, JSON.stringify(result));
     assert.equal(result.reason, 'wait_for_timeout');
+  });
+});
+
+describe('busy shield', () => {
+  beforeEach(() => {
+    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
+      url: 'https://admin.example.invalid/orders',
+    });
+    global.document = dom.window.document;
+    global.window = dom.window;
+    hideBusyShield(document);
+  });
+
+  it('shows a full-viewport overlay with Thai busy text and a11y attrs', () => {
+    const el = showBusyShield({ amount: '1,200.00' }, document);
+    assert.ok(el);
+    assert.equal(el.id, BUSY_SHIELD_ID);
+    assert.equal(el.getAttribute('role'), 'status');
+    assert.equal(el.getAttribute('aria-live'), 'polite');
+    assert.match(el.textContent, /ระบบกำลังดำเนินการ/);
+    assert.match(el.textContent, /1,200\.00/);
+    assert.match(el.style.cssText || el.getAttribute('style') || '', /pointer-events:\s*all/i);
+    assert.equal(document.getElementById(BUSY_SHIELD_ID), el);
+  });
+
+  it('hideBusyShield removes the overlay', () => {
+    showBusyShield({}, document);
+    assert.ok(document.getElementById(BUSY_SHIELD_ID));
+    hideBusyShield(document);
+    assert.equal(document.getElementById(BUSY_SHIELD_ID), null);
+  });
+
+  it('auto-dismisses after timeout with optional error text', async () => {
+    showBusyShield(
+      { timeoutMs: 40, timeoutMessage: 'หมดเวลา', timeoutRemoveMs: 50 },
+      document
+    );
+    assert.ok(document.getElementById(BUSY_SHIELD_ID));
+    await new Promise((r) => setTimeout(r, 80));
+    const el = document.getElementById(BUSY_SHIELD_ID);
+    // Either already removed, or briefly showing timeout text before removal.
+    if (el) {
+      assert.match(el.textContent, /หมดเวลา/);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(document.getElementById(BUSY_SHIELD_ID), null);
+  });
+
+  it('replacing show clears prior timer (no stuck overlay)', async () => {
+    showBusyShield({ timeoutMs: 30 }, document);
+    showBusyShield({ amount: '99' }, document);
+    assert.match(document.getElementById(BUSY_SHIELD_ID).textContent, /99/);
+    await new Promise((r) => setTimeout(r, 60));
+    // Second call used default long timeout — still present after 60ms.
+    assert.ok(document.getElementById(BUSY_SHIELD_ID));
+    hideBusyShield(document);
   });
 });

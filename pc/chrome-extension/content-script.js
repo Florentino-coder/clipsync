@@ -132,6 +132,27 @@ function showResultBanner(ok, detail) {
       return { ok: false, reason: 'no_match_key', event_id: eventId, amount: amount || undefined };
     }
 
+    // Busy shield: dim/blur page + block clicks while automation runs (auto + manual ยืนยันเอง).
+    // Auto-dismisses after ~75s if the engine hangs — never sticks forever.
+    if (typeof E.showBusyShield === 'function') {
+      E.showBusyShield({ amount: amount || undefined });
+    }
+    try {
+      return await runConfirmWithShield(data, profile, {
+        orderId,
+        amount,
+        refNumber,
+        eventId,
+        matchKeys,
+      });
+    } finally {
+      if (typeof E.hideBusyShield === 'function') E.hideBusyShield();
+    }
+  }
+
+  async function runConfirmWithShield(data, profile, ctx) {
+    const { amount, refNumber, eventId, matchKeys } = ctx;
+
     // Enrich slip before row lookup so same-amount rows can be narrowed by
     // member (payee) account + bank from the slip.
     const slip = enrichSlip(

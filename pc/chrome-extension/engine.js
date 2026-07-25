@@ -2607,6 +2607,93 @@
     });
   }
 
+  /** Full-viewport dim/blur overlay while confirm automation runs. */
+  const BUSY_SHIELD_ID = 'clipsync-busy-shield';
+  const BUSY_SHIELD_DEFAULT_TIMEOUT_MS = 75000;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let busyShieldTimer = null;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let busyShieldRemoveTimer = null;
+
+  function clearBusyShieldTimers() {
+    if (busyShieldTimer) {
+      clearTimeout(busyShieldTimer);
+      busyShieldTimer = null;
+    }
+    if (busyShieldRemoveTimer) {
+      clearTimeout(busyShieldRemoveTimer);
+      busyShieldRemoveTimer = null;
+    }
+  }
+
+  /**
+   * Show a click-blocking overlay: 「ระบบกำลังดำเนินการ」(+ amount if known).
+   * Auto-dismisses after timeoutMs (default 75s) so a hung engine never sticks forever.
+   * @param {{ amount?: string, message?: string, timeoutMs?: number, timeoutMessage?: string }} [opts]
+   * @param {Document} [doc]
+   */
+  function showBusyShield(opts, doc) {
+    const document = getDocument(doc);
+    if (!document || !document.documentElement) return null;
+    const options = opts && typeof opts === 'object' ? opts : {};
+    hideBusyShield(document);
+
+    const el = document.createElement('div');
+    el.id = BUSY_SHIELD_ID;
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.style.cssText =
+      'position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;' +
+      'flex-direction:column;gap:8px;pointer-events:all;cursor:wait;' +
+      'background:rgba(0,0,0,0.45);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);' +
+      'color:#fff;font:600 20px/1.4 "Segoe UI",Tahoma,sans-serif;text-align:center;padding:24px;';
+
+    const title = document.createElement('div');
+    title.textContent = options.message || 'ระบบกำลังดำเนินการ';
+    el.appendChild(title);
+
+    const amount = options.amount != null ? String(options.amount).trim() : '';
+    if (amount) {
+      const sub = document.createElement('div');
+      sub.style.cssText = 'font-weight:400;font-size:16px;opacity:0.9;';
+      sub.textContent = amount;
+      el.appendChild(sub);
+    }
+
+    document.documentElement.appendChild(el);
+
+    const timeoutMs =
+      typeof options.timeoutMs === 'number' && options.timeoutMs >= 0
+        ? options.timeoutMs
+        : BUSY_SHIELD_DEFAULT_TIMEOUT_MS;
+    const timeoutMessage = options.timeoutMessage || 'หมดเวลา — ลองใหม่หรือยืนยันเอง';
+    const timeoutRemoveMs =
+      typeof options.timeoutRemoveMs === 'number' && options.timeoutRemoveMs >= 0
+        ? options.timeoutRemoveMs
+        : 4000;
+    busyShieldTimer = setTimeout(() => {
+      busyShieldTimer = null;
+      const cur = document.getElementById(BUSY_SHIELD_ID);
+      if (!cur) return;
+      cur.textContent = timeoutMessage;
+      cur.style.cursor = 'default';
+      busyShieldRemoveTimer = setTimeout(() => {
+        busyShieldRemoveTimer = null;
+        hideBusyShield(document);
+      }, timeoutRemoveMs);
+    }, timeoutMs);
+
+    return el;
+  }
+
+  function hideBusyShield(doc) {
+    clearBusyShieldTimers();
+    const document = getDocument(doc);
+    if (!document) return;
+    const el = document.getElementById(BUSY_SHIELD_ID);
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
   return {
     normalize,
     matchNeedles,
@@ -2635,5 +2722,9 @@
     waitForPostClickVerify,
     dismissMessageBox,
     setMainWorldClicker,
+    BUSY_SHIELD_ID,
+    BUSY_SHIELD_DEFAULT_TIMEOUT_MS,
+    showBusyShield,
+    hideBusyShield,
   };
 });

@@ -16,8 +16,8 @@
     "notes": "Fix hang on Slip Capture OFF / Stop Sync: timeout cleanup (WS/EventChannel/server), always clear Please wait, Force Stop if stuck."
   },
   "extension": {
-    "version": "1.0.36",
+    "version": "1.0.37",
     "download_url": "",
-    "notes": "Scrape skips tiny order ids like '1'; match by amount+account instead."
+    "notes": "Busy shield: dim/blur Jinbao page with 「ระบบกำลังดำเนินการ」during confirm; auto-dismiss ~75s."
   }
 }

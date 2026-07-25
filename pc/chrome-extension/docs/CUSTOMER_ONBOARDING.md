@@ -46,6 +46,10 @@ If DevTools HAR shows a stable in-session list + approve API:
 2. Prefer API path for pending list polling; fall back to DOM scrape if API errors.
 3. If approve payload is unclear, keep approve stubbed and use `close_job_workflow` DOM steps instead.
 
+## Busy shield (confirm in progress)
+
+While a confirm runs (auto-confirm or PC “ยืนยันเอง”), the content script shows a full-viewport dim/blur overlay with **「ระบบกำลังดำเนินการ」** (and amount when known). It blocks staff clicks (`pointer-events: all`), announces via `role="status"` / `aria-live="polite"`, and always clears on success/failure/cancel. If the engine hangs, the shield auto-dismisses after ~75s with a short timeout message so it never sticks forever.
+
 ## Related docs
 
 - `docs/OPEN_ITEMS.md` — Gate 4 blockers (permission letter, real domain, HAR approve)
