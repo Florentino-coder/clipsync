@@ -10,10 +10,10 @@
     "notes": "Emit typed withdraw_notify to relay for newly scraped pending orders (full account + amount)."
   },
   "android": {
-    "version": "0.9.5+26",
+    "version": "0.9.6+27",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "Fix hang on Slip Capture OFF / Stop Sync: timeout cleanup (WS/EventChannel/server), always clear Please wait, Force Stop if stuck."
+    "notes": "FGS WebSocket handles typed withdraw_notify: upsert local queue and forward to main isolate (not as clip)."
   },
   "extension": {
     "version": "1.0.38",

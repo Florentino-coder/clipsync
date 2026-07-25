@@ -10,12 +10,14 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'withdraw/withdraw_ws.dart';
+
 // Configure this with your relay WebSocket URL.
 // Examples:
 // - ws://YOUR_VPS_IP:8765
 // - wss://clipsync-relay.onrender.com
 const kRelayUrl = 'wss://clipsync-relay.onrender.com';
-const kAppVersion = '0.9.5+26';
+const kAppVersion = '0.9.6+27';
 
 /// SharedPreferences key for pairing v2 HMAC secret (see [slip_bootstrap.dart]).
 const kSharedSecretPrefKey = 'shared_secret';
@@ -192,6 +194,15 @@ class ClipTaskHandler extends TaskHandler {
                 final preview =
                     text.length > 45 ? '${text.substring(0, 45)}...' : text;
                 _setNotification('Clipboard: $preview');
+                break;
+
+              case 'withdraw_notify':
+                handleWithdrawNotifyMessage(msg, WithdrawQueueStore.instance);
+                FlutterForegroundTask.sendDataToMain({
+                  'type': 'withdraw_notify',
+                  ...msg,
+                });
+                // notification update happens in Task 7
                 break;
 
               case 'heartbeat_ack':

@@ -17,6 +17,8 @@ import 'license/license_gate.dart';
 import 'license/license_service.dart';
 import 'slip/slip_bootstrap.dart';
 import 'update_service.dart';
+import 'withdraw/withdraw_queue.dart';
+import 'withdraw/withdraw_ws.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -44,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _status = 'Not connected';
   String _targetId = '';
   SlipBootstrap? _slipBootstrap;
+  final WithdrawQueue _withdrawQueue = WithdrawQueue();
 
   @override
   void initState() {
@@ -231,6 +234,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _status = 'Clipboard received';
       });
       _addEvent('Clipboard ${text.length} chars');
+    } else if (type == 'withdraw_notify') {
+      handleWithdrawNotifyMessage(msg, _withdrawQueue);
+      setState(() {});
+      final orderId = msg['order_id'] as String? ?? '';
+      _addEvent('Withdraw notify $orderId');
     } else if (type == 'status') {
       final online = msg['online'] == true;
       setState(() {
