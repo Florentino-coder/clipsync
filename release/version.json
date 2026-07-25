@@ -3,11 +3,11 @@
   "released_at": "2026-07-25",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.8",
+    "version": "0.9.9",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Setup installs Chrome extension to %AppData%\\Roaming\\ClipSync\\chrome-extension; Settings shows full path + guide_install (Copy / open chrome://extensions); update = Setup + Reload. Portable syncs same path on launch."
+    "notes": "Settings: scrollable body + sticky Save/Reload footer; grouped sections; 2-column layout when wide. Fixes content overflow on large/high-DPI monitors."
   },
   "android": {
     "version": "0.9.5+26",

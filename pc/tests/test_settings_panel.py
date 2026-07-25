@@ -1,16 +1,19 @@
-"""Unit tests for settings form mapping + transport indicator (no Tk)."""
+"""Unit tests for settings form mapping + transport indicator + layout."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from clipsync.config import default_config
+import pytest
+
+from clipsync.config import default_config, save_config
 from clipsync.ui.settings_panel import (
     SettingsFormValues,
     apply_form_values,
     extension_install_path_text,
     form_values_from_config,
     pairing_token_from_config,
+    settings_use_two_columns,
     transport_indicator,
 )
 
@@ -99,3 +102,52 @@ def test_extension_install_path_text_is_full_stable_path(tmp_path: Path):
     assert "ClipSync" in path
     assert "chrome-extension" in path
     assert "_internal" not in path
+
+
+def test_settings_use_two_columns_threshold():
+    assert settings_use_two_columns(819) is False
+    assert settings_use_two_columns(820) is True
+    assert settings_use_two_columns(1200) is True
+
+
+def test_settings_panel_scrollable_body_and_sticky_footer(tmp_path: Path):
+    tk = pytest.importorskip("tkinter")
+    ttk = pytest.importorskip("tkinter.ttk")
+    from clipsync.ui.settings_panel import SettingsPanel
+
+    cfg_path = tmp_path / "clipsync-config.json"
+    save_config(default_config(), path=cfg_path)
+
+    root = tk.Tk()
+    root.withdraw()
+    root.geometry("640x420")
+    try:
+        tab = ttk.Frame(root)
+        tab.pack(fill="both", expand=True)
+        panel = SettingsPanel(tab, config_path=cfg_path)
+        root.update_idletasks()
+
+        assert hasattr(panel, "_body_canvas")
+        assert panel._body_canvas.winfo_exists()
+        assert hasattr(panel, "_scroll_inner")
+        assert panel._scroll_inner.winfo_exists()
+        assert hasattr(panel, "_actions_frame")
+        # Sticky footer lives on the outer frame, not inside the scroll canvas.
+        assert str(panel._actions_frame.winfo_parent()) == str(panel.frame)
+        assert str(panel._body_canvas.winfo_parent()) != str(panel._scroll_inner)
+        # Extension path + Thai section titles still present after layout redesign.
+        assert "chrome-extension" in panel._ext_path_var.get()
+
+        def _labelframe_texts(widget) -> list[str]:
+            texts: list[str] = []
+            for child in widget.winfo_children():
+                if child.winfo_class() in ("TLabelframe", "Labelframe"):
+                    texts.append(str(child.cget("text")))
+                texts.extend(_labelframe_texts(child))
+            return texts
+
+        kids_text = " ".join(_labelframe_texts(panel._scroll_inner))
+        assert "Chrome" in kids_text or "extension" in kids_text.lower()
+        assert "APK" in kids_text
+    finally:
+        root.destroy()

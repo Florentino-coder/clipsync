@@ -45,7 +45,7 @@ from clipsync.ui.debug_panel import DebugPanel
 from clipsync.ui.settings_panel import SettingsPanel
 
 APP_NAME = "ClipSync PC"
-APP_VERSION = "0.9.8"
+APP_VERSION = "0.9.9"
 AUTHOR_NAME = "Florentino356"
 DEFAULT_RELAY_URL = "wss://clipsync-relay.onrender.com"
 UPDATE_MANIFEST_URL = (
@@ -504,8 +504,8 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
         self._on_slip_config_reload: Optional[Callable[[dict[str, Any]], None]] = None
 
         self.title(APP_NAME)
-        self.geometry("720x640")
-        self.minsize(560, 560)
+        self.geometry("860x700")
+        self.minsize(560, 480)
         self.configure(bg="#f6f8fb")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._load_window_icon()

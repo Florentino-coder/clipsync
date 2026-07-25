@@ -19,6 +19,14 @@ from clipsync.config import _PREFERRED_MODES, default_config_path, load_config, 
 
 ReloadCallback = Callable[[dict[str, Any]], None]
 
+# Switch to side-by-side columns when the scroll viewport is at least this wide.
+WIDE_LAYOUT_MIN_WIDTH = 820
+
+
+def settings_use_two_columns(viewport_width: int) -> bool:
+    """True when Settings should use a 2-column body layout."""
+    return int(viewport_width) >= WIDE_LAYOUT_MIN_WIDTH
+
 
 @dataclass(frozen=True)
 class SettingsFormValues:
@@ -104,7 +112,11 @@ def copy_text_to_clipboard(text: str, *, root: Any = None) -> None:
 
 
 class SettingsPanel:
-    """Form to edit slip config with save + hot-reload callback."""
+    """Form to edit slip config with save + hot-reload callback.
+
+    Layout: transport strip (top) → scrollable body (middle) → sticky footer
+    (Save / Reload / Copy pairing token). Body uses 1 or 2 columns by width.
+    """
 
     def __init__(
         self,
@@ -124,28 +136,144 @@ class SettingsPanel:
         self._on_push_profiles = on_push_profiles
         self._on_guide_install = on_guide_install
         self._transport_name = initial_transport
+        self._two_col: Optional[bool] = None
+        self._apk_url: str = ""
+        self._apk_qr_photo = None  # keep PhotoImage ref alive
 
         self.frame = ttk.Frame(parent, padding=12)
         self.frame.pack(fill="both", expand=True)
+        self.frame.rowconfigure(1, weight=1)
+        self.frame.columnconfigure(0, weight=1)
 
+        # --- top: live transport ---
         self._transport_var = tk.StringVar(value="")
         self._transport_label = ttk.Label(
             self.frame,
             textvariable=self._transport_var,
             font=("Segoe UI", 11, "bold"),
         )
-        self._transport_label.pack(anchor="w", pady=(0, 12))
+        self._transport_label.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         self.set_transport(initial_transport)
 
-        form = ttk.Frame(self.frame)
-        form.pack(fill="x")
+        # --- middle: scrollable body ---
+        body = ttk.Frame(self.frame)
+        body.grid(row=1, column=0, sticky="nsew")
+        body.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+
+        self._body_canvas = tk.Canvas(
+            body,
+            highlightthickness=0,
+            borderwidth=0,
+            bg="#ffffff",
+        )
+        self._body_scrollbar = ttk.Scrollbar(
+            body, orient="vertical", command=self._body_canvas.yview
+        )
+        self._body_canvas.configure(yscrollcommand=self._body_scrollbar.set)
+        self._body_canvas.grid(row=0, column=0, sticky="nsew")
+        self._body_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self._scroll_inner = ttk.Frame(self._body_canvas, padding=(0, 0, 8, 8))
+        self._scroll_window = self._body_canvas.create_window(
+            (0, 0), window=self._scroll_inner, anchor="nw"
+        )
+        self._scroll_inner.bind("<Configure>", self._on_scroll_inner_configure)
+        self._body_canvas.bind("<Configure>", self._on_body_canvas_configure)
+        self._bind_mousewheel(self._body_canvas)
+        self._bind_mousewheel(self._scroll_inner)
 
         self._auto_confirm = tk.BooleanVar(value=False)
         self._threshold_enabled = tk.BooleanVar(value=True)
         self._amount_threshold = tk.StringVar(value="5000")
         self._min_confidence = tk.StringVar(value="0.90")
         self._preferred_mode = tk.StringVar(value="auto")
+        self._ext_path_var = tk.StringVar(value=extension_install_path_text())
+        self._pairing_token = tk.StringVar(value="")
+        self._ws_port_var = tk.StringVar(value="")
+        self._apk_status = tk.StringVar(value="")
 
+        self._col_left = ttk.Frame(self._scroll_inner)
+        self._col_right = ttk.Frame(self._scroll_inner)
+        self._build_general_section(self._col_left)
+        self._build_chrome_section(self._col_right)
+        self._build_pairing_section(self._col_right)
+        self._build_apk_section(self._col_right)
+        self._apply_column_layout(False)
+
+        # --- bottom: sticky actions ---
+        self._actions_frame = ttk.Frame(self.frame)
+        self._actions_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        ttk.Button(self._actions_frame, text="Save", command=self.save).pack(side="left")
+        ttk.Button(
+            self._actions_frame, text="Reload from disk", command=self.load_into_form
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            self._actions_frame,
+            text="Copy pairing token",
+            command=self.copy_pairing_token,
+        ).pack(side="left", padx=(8, 0))
+
+        self._status_var = tk.StringVar(value="")
+        ttk.Label(self.frame, textvariable=self._status_var).grid(
+            row=3, column=0, sticky="ew", pady=(8, 0)
+        )
+
+        self.load_into_form()
+        self.refresh_apk_status()
+
+    def _bind_mousewheel(self, widget: Any) -> None:
+        widget.bind("<Enter>", self._on_scroll_enter, add="+")
+        widget.bind("<Leave>", self._on_scroll_leave, add="+")
+
+    def _on_scroll_enter(self, _event: Any = None) -> None:
+        self._body_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _on_scroll_leave(self, _event: Any = None) -> None:
+        self._body_canvas.unbind_all("<MouseWheel>")
+
+    def _on_mousewheel(self, event: Any) -> None:
+        if event.delta:
+            self._body_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_scroll_inner_configure(self, _event: Any = None) -> None:
+        self._body_canvas.configure(scrollregion=self._body_canvas.bbox("all"))
+
+    def _on_body_canvas_configure(self, event: Any) -> None:
+        self._body_canvas.itemconfigure(self._scroll_window, width=max(event.width, 1))
+        self._apply_column_layout(settings_use_two_columns(event.width))
+
+    def _apply_column_layout(self, two_col: bool) -> None:
+        if self._two_col is two_col:
+            return
+        self._two_col = two_col
+        self._col_left.pack_forget()
+        self._col_right.pack_forget()
+        if two_col:
+            self._col_left.pack(side="left", fill="both", expand=True, padx=(0, 10))
+            self._col_right.pack(side="left", fill="both", expand=True, padx=(10, 0))
+        else:
+            self._col_left.pack(fill="x", expand=True)
+            self._col_right.pack(fill="x", expand=True, pady=(10, 0))
+        self._scroll_inner.update_idletasks()
+        self._body_canvas.configure(scrollregion=self._body_canvas.bbox("all"))
+
+    def _section(self, parent: Any, title: str) -> Any:
+        box = ttk.LabelFrame(parent, text=title, padding=10)
+        box.pack(fill="x", expand=True, pady=(0, 10))
+        box.columnconfigure(1, weight=1)
+        return box
+
+    def _muted(self, parent: Any, text: str, *, row: int, wrap: int = 480) -> None:
+        ttk.Label(
+            parent,
+            text=text,
+            foreground="#667085",
+            wraplength=wrap,
+        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+    def _build_general_section(self, parent: Any) -> None:
+        form = self._section(parent, "ทั่วไป / Auto-confirm")
         row = 0
         ttk.Checkbutton(
             form, text="Auto-confirm (ยืนยันอัตโนมัติ)", variable=self._auto_confirm
@@ -168,37 +296,24 @@ class SettingsPanel:
         )
         row += 1
         ttk.Label(form, text="Preferred transport").grid(row=row, column=0, sticky="w")
-        mode_box = ttk.Combobox(
+        ttk.Combobox(
             form,
             textvariable=self._preferred_mode,
             values=("auto", "usb", "relay"),
             state="readonly",
             width=14,
-        )
-        mode_box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=4)
+        ).grid(row=row, column=1, sticky="w", padx=(8, 0), pady=4)
 
-        row += 1
-        ttk.Separator(form, orient="horizontal").grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=(12, 8)
+    def _build_chrome_section(self, parent: Any) -> None:
+        form = self._section(parent, "ติดตั้ง Chrome extension")
+        row = 0
+        self._muted(
+            form,
+            "ครั้งแรก: กดติดตั้ง → Load unpacked จาก path ด้านล่าง  "
+            "อัปเดตครั้งถัดไป: ติดตั้ง Setup ใหม่แล้วกด Reload ใน Chrome",
+            row=row,
         )
         row += 1
-        ttk.Label(
-            form,
-            text="ติดตั้ง Chrome extension",
-            font=("Segoe UI", 10, "bold"),
-        ).grid(row=row, column=0, columnspan=3, sticky="w")
-        row += 1
-        ttk.Label(
-            form,
-            text=(
-                "ครั้งแรก: กดติดตั้ง → Load unpacked จาก path ด้านล่าง  "
-                "อัปเดตครั้งถัดไป: ติดตั้ง Setup ใหม่แล้วกด Reload ใน Chrome"
-            ),
-            foreground="#667085",
-            wraplength=520,
-        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
-        row += 1
-        self._ext_path_var = tk.StringVar(value=extension_install_path_text())
         ttk.Label(form, text="โฟลเดอร์ extension (path เต็ม)", foreground="#344054").grid(
             row=row, column=0, columnspan=3, sticky="w"
         )
@@ -224,16 +339,9 @@ class SettingsPanel:
             command=self.open_chrome_extensions_page,
         ).pack(side="left", padx=(8, 0))
 
-        row += 1
-        ttk.Separator(form, orient="horizontal").grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=(12, 8)
-        )
-        row += 1
-        ttk.Label(form, text="Chrome extension pairing token", font=("Segoe UI", 10, "bold")).grid(
-            row=row, column=0, columnspan=3, sticky="w"
-        )
-        row += 1
-        self._pairing_token = tk.StringVar(value="")
+    def _build_pairing_section(self, parent: Any) -> None:
+        form = self._section(parent, "Chrome extension pairing")
+        row = 0
         token_entry = ttk.Entry(
             form, textvariable=self._pairing_token, width=40, state="readonly"
         )
@@ -242,13 +350,13 @@ class SettingsPanel:
             row=row, column=2, sticky="w", padx=(8, 0)
         )
         row += 1
-        ttk.Label(
+        self._muted(
             form,
-            text="หลัง Load unpacked แล้ว: วาง token นี้ใน popup ของ ClipSync Slip Bridge → Save",
-            foreground="#667085",
-        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
+            "หลัง Load unpacked แล้ว: วาง token นี้ใน popup ของ ClipSync Slip Bridge → Save",
+            row=row,
+            wrap=520,
+        )
         row += 1
-        self._ws_port_var = tk.StringVar(value="")
         ttk.Label(form, textvariable=self._ws_port_var, foreground="#667085").grid(
             row=row, column=0, columnspan=3, sticky="w"
         )
@@ -259,28 +367,18 @@ class SettingsPanel:
             command=self.push_site_profiles,
         ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 4))
         row += 1
-        ttk.Label(
+        self._muted(
             form,
-            text="โหลด profiles จาก chrome-extension/profiles (ข้าม example*) แล้วส่งให้ extension ที่ connected",
-            foreground="#667085",
-            wraplength=520,
-        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
+            "โหลด profiles จาก chrome-extension/profiles (ข้าม example*) แล้วส่งให้ extension ที่ connected",
+            row=row,
+        )
 
-        row += 1
-        ttk.Separator(form, orient="horizontal").grid(
-            row=row, column=0, columnspan=3, sticky="ew", pady=(12, 8)
-        )
-        row += 1
+    def _build_apk_section(self, parent: Any) -> None:
+        form = self._section(parent, "ติดตั้ง APK มือถือ (PC Hotspot + QR)")
+        row = 0
         ttk.Label(
-            form,
-            text="ติดตั้ง APK มือถือ (PC Hotspot + QR / ไม่ต้อง ADB)",
-            font=("Segoe UI", 10, "bold"),
-        ).grid(row=row, column=0, columnspan=3, sticky="w")
-        row += 1
-        self._apk_status = tk.StringVar(value="")
-        ttk.Label(form, textvariable=self._apk_status, foreground="#667085", wraplength=520).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(0, 4)
-        )
+            form, textvariable=self._apk_status, foreground="#667085", wraplength=520
+        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
         row += 1
         apk_btns = ttk.Frame(form)
         apk_btns.grid(row=row, column=0, columnspan=3, sticky="w", pady=4)
@@ -302,24 +400,6 @@ class SettingsPanel:
         row += 1
         self._apk_qr_label = ttk.Label(form)
         self._apk_qr_label.grid(row=row, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        self._apk_url: str = ""
-        self._apk_qr_photo = None  # keep PhotoImage ref alive
-
-        actions = ttk.Frame(self.frame)
-        actions.pack(fill="x", pady=(16, 0))
-        ttk.Button(actions, text="Save", command=self.save).pack(side="left")
-        ttk.Button(actions, text="Reload from disk", command=self.load_into_form).pack(
-            side="left", padx=(8, 0)
-        )
-        ttk.Button(actions, text="Copy pairing token", command=self.copy_pairing_token).pack(
-            side="left", padx=(8, 0)
-        )
-
-        self._status_var = tk.StringVar(value="")
-        ttk.Label(self.frame, textvariable=self._status_var).pack(anchor="w", pady=(10, 0))
-
-        self.load_into_form()
-        self.refresh_apk_status()
 
     def set_transport(self, name: Optional[str]) -> None:
         self._transport_name = name
