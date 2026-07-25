@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'withdraw/withdraw_notify_service.dart';
 import 'withdraw/withdraw_ws.dart';
 
 // Configure this with your relay WebSocket URL.
@@ -17,7 +18,7 @@ import 'withdraw/withdraw_ws.dart';
 // - ws://YOUR_VPS_IP:8765
 // - wss://clipsync-relay.onrender.com
 const kRelayUrl = 'wss://clipsync-relay.onrender.com';
-const kAppVersion = '0.9.6+27';
+const kAppVersion = '0.9.7+28';
 
 /// SharedPreferences key for pairing v2 HMAC secret (see [slip_bootstrap.dart]).
 const kSharedSecretPrefKey = 'shared_secret';
@@ -122,6 +123,12 @@ class ClipTaskHandler extends TaskHandler {
         (await FlutterForegroundTask.getData<String>(key: 'target_id') ?? '')
             .replaceAll('-', '');
     _alive = true;
+    withdrawQueueProvider = () => WithdrawQueueStore.instance;
+    try {
+      await WithdrawNotifyService.instance.init();
+    } catch (e) {
+      _sendDebug('withdraw notify init error: $e');
+    }
     _sendDebug('service start target=${fmtId(_targetId)}');
     _connect();
   }
@@ -197,12 +204,22 @@ class ClipTaskHandler extends TaskHandler {
                 break;
 
               case 'withdraw_notify':
-                handleWithdrawNotifyMessage(msg, WithdrawQueueStore.instance);
+                final queue = WithdrawQueueStore.instance;
+                final wasEmpty = queue.pending.isEmpty;
+                handleWithdrawNotifyMessage(msg, queue);
                 FlutterForegroundTask.sendDataToMain({
                   'type': 'withdraw_notify',
                   ...msg,
                 });
-                // notification update happens in Task 7
+                try {
+                  await WithdrawNotifyService.instance.syncFromQueue(
+                    queue,
+                    allowHeadsUp: true,
+                    wasEmpty: wasEmpty,
+                  );
+                } catch (e) {
+                  _sendDebug('withdraw notify sync error: $e');
+                }
                 break;
 
               case 'heartbeat_ack':

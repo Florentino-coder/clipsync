@@ -3,7 +3,7 @@ description: Clipboard sync from PC to phone
 
 publish_to: "none"
 
-version: 0.9.6+27
+version: 0.9.7+28
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -12,6 +12,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_foreground_task: 8.17.0
+  flutter_local_notifications: ^18.0.1
   mobile_scanner: 7.2.0
   shared_preferences: 2.3.2
   url_launcher: 6.3.1
@@ -31,5 +32,12 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
 
+# path_provider_foundation 2.6+ pulls objective_c native-assets hooks that break
+# `flutter test` on this Windows Flutter 3.44 toolchain (space/drive path).
+dependency_overrides:
+  path_provider_foundation: 2.4.1
+
 flutter:
   uses-material-design: true
+  assets:
+    - assets/banks/
