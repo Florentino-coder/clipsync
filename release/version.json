@@ -3,11 +3,11 @@
   "released_at": "2026-07-24",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.2",
+    "version": "0.9.3",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Fix auto-confirm: match scraped amounts/last4, push slip+amount like manual."
+    "notes": "Auto-confirm amount-only fallback when pending_orders scrape is empty."
   },
   "android": {
     "version": "0.9.3+24",

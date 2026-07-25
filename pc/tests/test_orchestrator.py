@@ -442,3 +442,35 @@ async def test_duplicate_event_still_invokes_send_ack(tmp_path: Path):
     result = await orch.handle_slip_event(EVENT, source="usb")
     assert result["decision"] == "duplicate"
     assert acked == ["evt-001"]
+
+
+@pytest.mark.asyncio
+async def test_auto_confirm_amount_only_when_pending_orders_empty(tmp_path: Path):
+    """Scrape empty → still auto-push by amount+slip (same as manual confirm)."""
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+    # No on_pending_orders — list stays empty (live Jinbao scrape often misses).
+
+    async def _reply() -> None:
+        await asyncio.sleep(0.02)
+        orch.on_confirm_result(
+            {
+                "type": "confirm_result",
+                "orderId": "350.00",
+                "matchKey": "350.00",
+                "ok": True,
+                "verified": True,
+                "reason": None,
+            }
+        )
+
+    t = asyncio.create_task(_reply())
+    result = await orch.handle_slip_event(EVENT, source="usb")
+    await t
+
+    bridge.push_confirm_order.assert_awaited_once()
+    call = bridge.push_confirm_order.await_args
+    assert call.args[0] == "350.00"
+    assert isinstance(call.kwargs.get("slip"), dict)
+    assert result["decision"] == "auto_confirmed"

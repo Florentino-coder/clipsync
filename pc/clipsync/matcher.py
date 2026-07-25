@@ -172,6 +172,45 @@ def match_order(
     return candidates[0]
 
 
+def resolve_auto_match(
+    ocr: Mapping[str, Any],
+    orders: Iterable[Mapping[str, Any]],
+    cfg: Mapping[str, Any],
+    used_refs: Optional[MutableSet[str] | Set[str]] = None,
+) -> Optional[dict[str, Any]]:
+    """Match a pending order, or fall back to amount-only when scrape is empty/misses.
+
+    Manual confirm already pushes by amount+slip without a scraped order_id. Auto
+    must do the same when the extension has not published pending_orders yet (or
+    Jinbao DOM scrape returned nothing) — otherwise every slip stays pending_review
+    forever even with Auto-confirm ticked.
+    """
+    matched = match_order(ocr, orders, cfg, used_refs=used_refs)
+    if matched is not None:
+        return matched
+
+    order_list = [dict(o) for o in orders]
+    amount_hits = [
+        o for o in order_list if _amounts_equal(ocr.get("amount"), o.get("amount"))
+    ]
+    # Ambiguous same-amount rows on the scrape list → leave for manual review.
+    if len(amount_hits) > 1:
+        return None
+    # Scrape listed this amount but last4/bank blocked the match → do not override.
+    if len(amount_hits) == 1:
+        return None
+    # No scrape list, or scrape missed this amount → amount-only (extension finds row).
+    if _parse_amount(ocr.get("amount")) is None:
+        return None
+    return {
+        "order_id": "",
+        "amount": ocr.get("amount"),
+        "account_last4": "",
+        "bank": "",
+        "match_mode": "amount_only",
+    }
+
+
 def should_auto_confirm(
     ocr: Mapping[str, Any],
     matched_order: Optional[Mapping[str, Any]],

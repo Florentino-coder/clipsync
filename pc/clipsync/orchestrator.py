@@ -12,7 +12,12 @@ from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Optional
 
 from clipsync.audit import append_audit
 from clipsync.config import user_data_dir
-from clipsync.matcher import load_used_refs, match_order, save_used_refs, should_auto_confirm
+from clipsync.matcher import (
+    load_used_refs,
+    resolve_auto_match,
+    save_used_refs,
+    should_auto_confirm,
+)
 from clipsync.seen_events import SeenEvents, default_seen_events_path
 
 logger = logging.getLogger(__name__)
@@ -200,7 +205,7 @@ class SlipOrchestrator:
 
         self._seen.mark(event_id)
 
-        matched = match_order(
+        matched = resolve_auto_match(
             event, self._pending_orders, self._cfg, used_refs=self._used_refs
         )
 

@@ -334,3 +334,30 @@ def test_missing_ocr_confidence_still_auto_confirms_when_enabled():
     matched = match_order(OCR, ORDERS, CFG, used_refs=set())
     ocr = {k: v for k, v in OCR.items() if k != "ocr_confidence"}
     assert should_auto_confirm(ocr, matched, CFG) is True
+
+
+def test_resolve_auto_match_amount_only_when_scrape_empty():
+    from clipsync.matcher import resolve_auto_match
+
+    matched = resolve_auto_match(OCR, [], CFG, used_refs=set())
+    assert matched is not None
+    assert matched.get("match_mode") == "amount_only"
+    assert matched["amount"] == OCR["amount"]
+    assert should_auto_confirm(OCR, matched, CFG) is True
+
+
+def test_resolve_auto_match_does_not_override_last4_conflict():
+    from clipsync.matcher import resolve_auto_match
+
+    orders = [{"order_id": "x", "amount": 350.0, "account_last4": "0000"}]
+    assert resolve_auto_match(OCR, orders, CFG, used_refs=set()) is None
+
+
+def test_resolve_auto_match_ambiguous_same_amount_stays_none():
+    from clipsync.matcher import resolve_auto_match
+
+    orders = [
+        {"order_id": "a", "amount": 350.0},
+        {"order_id": "b", "amount": 350.0},
+    ]
+    assert resolve_auto_match(OCR, orders, CFG, used_refs=set()) is None
