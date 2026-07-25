@@ -301,3 +301,36 @@ def test_bank_match_skipped_when_ocr_has_no_receiver_bank():
     matched = match_order(ocr, orders, cfg, used_refs=set())
     assert matched is not None
     assert matched["order_id"] == "a"
+
+
+def test_dom_scrape_amount_with_commas_matches():
+    """Jinbao scrape yields '1,097.00' — must still match float OCR amounts."""
+    orders = [{"order_id": "row-1", "amount": "1,097.00", "account_last4": ""}]
+    ocr = {
+        "amount": 1097.0,
+        "receiver_account_last4": "8474",
+        "ocr_confidence": 0.95,
+        "ref_number": "R1",
+    }
+    matched = match_order(ocr, orders, CFG, used_refs=set())
+    assert matched is not None
+    assert matched["order_id"] == "row-1"
+
+
+def test_empty_order_last4_does_not_block_unique_amount():
+    """DOM scrape without account digits → amount-only match when unique."""
+    orders = [{"order_id": "0971572720", "amount": "1097.00"}]
+    ocr = {
+        "amount": 1097.0,
+        "receiver_account_last4": "8474",
+        "ocr_confidence": 0.95,
+    }
+    matched = match_order(ocr, orders, CFG, used_refs=set())
+    assert matched is not None
+    assert matched["order_id"] == "0971572720"
+
+
+def test_missing_ocr_confidence_still_auto_confirms_when_enabled():
+    matched = match_order(OCR, ORDERS, CFG, used_refs=set())
+    ocr = {k: v for k, v in OCR.items() if k != "ocr_confidence"}
+    assert should_auto_confirm(ocr, matched, CFG) is True

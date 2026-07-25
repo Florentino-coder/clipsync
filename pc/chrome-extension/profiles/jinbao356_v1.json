@@ -25,6 +25,9 @@
     "approved",
     "ปิดงานแล้ว"
   ],
+  "row_approved_indicators": [
+    "อนุมัติ"
+  ],
   "logout_indicators": [
     "form[action*='login']",
     "input[type='password']",
@@ -137,6 +140,7 @@
     {
       "action": "wait_for",
       "match_text": "ยืนยันการถอนรายการ|คุณแน่ใจใช่ไหมที่จะบันทึก|บันทึก รายการถอน สำเร็จ",
+      "require_visible": true,
       "timeout_ms": 8000
     },
     {
@@ -147,6 +151,7 @@
     {
       "action": "wait_for",
       "match_text": "บันทึก รายการถอน สำเร็จ|รายการถอน สำเร็จ",
+      "satisfied_by": "success_observed",
       "timeout_ms": 10000
     },
     {
@@ -156,6 +161,7 @@
         "รายการถอน สำเร็จ",
         "ปิดงานสำเร็จ"
       ],
+      "satisfied_by": "success_observed",
       "timeout_ms": 5000
     },
     {
@@ -168,6 +174,8 @@
     "Target page: https://manage.jinbao356.com/withdraw/transaction",
     "Close-job form is below the fold in the withdrawal modal — scroll_into_view first.",
     "After บันทึก, Jinbao shows BootstrapVue confirm (ยืนยันการถอนรายการ) — click ตกลง, then SweetAlert2 success — click ตกลง again.",
+    "One dismiss_dialog closes ONE popup: the success SweetAlert2 that mounts from the confirm click is left for the wait_for/verify_result steps, which also pass on satisfied_by success_observed when it is already gone.",
+    "row_approved_indicators is the post-submit proof on the list page (row shows อนุมัติ). Keep it OUT of already_confirmed_indicators — findConfirmButton would then skip rows whose action button is literally 'อนุมัติ'.",
     "Shop payout account is matched by the slip 'จาก' (sender) account. Prefer the position-aware mask template (sender_account_masked, e.g. '5840xxx518') which works across banks that hide the tail (KBANK 'xxx-x-x0758-x') or show few digits (BBL '584-0-xxx518'); sender_account_last4 is a fallback.",
     "Keep dry_run true until live clicks are verified end-to-end."
   ]

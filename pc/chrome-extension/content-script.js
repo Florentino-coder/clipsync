@@ -202,8 +202,13 @@ function showResultBanner(ok, detail) {
       } catch (_) {
         /* ignore */
       }
+      // The site can close the job while the workflow loses sight of the proof
+      // (success dialog eaten, list re-rendered) — that is still a green result.
+      const closedAnyway = result.reason === 'already_confirmed' || result.reason === 'success_observed';
       if (result.reason === 'dry_run') {
         showDryRunBanner(usedKey);
+      } else if (result.ok && closedAnyway) {
+        showResultBanner(true, `ClipSync: ปิดงานสำเร็จแล้ว (${result.via || 'already_confirmed'}) (จับ: ${usedKey})`);
       } else if (!result.ok) {
         // On account-field failures, surface the slip fields we actually received so we
         // can see which key (if any) carries the payer account number.

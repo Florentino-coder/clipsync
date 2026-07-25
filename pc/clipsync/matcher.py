@@ -20,27 +20,37 @@ _BANK_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _parse_amount(value: Any) -> Optional[float]:
+    """Parse amount from int/float/str. Accepts thousands commas (\"1,097.00\")."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        cleaned = value.strip().replace(",", "").replace(" ", "")
+        # Strip currency suffixes like THB / บาท
+        for suffix in ("THB", "บาท", "฿"):
+            if cleaned.upper().endswith(suffix):
+                cleaned = cleaned[: -len(suffix)]
+        cleaned = cleaned.strip()
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
 def _amount_present(value: Any) -> bool:
     """True when amount is a usable number (missing/None rejected; never default to 0)."""
-    if value is None:
-        return False
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, (int, float)):
-        return True
-    if isinstance(value, str) and value.strip():
-        try:
-            float(value)
-            return True
-        except ValueError:
-            return False
-    return False
+    return _parse_amount(value) is not None
 
 
 def _amounts_equal(a: Any, b: Any) -> bool:
-    if not _amount_present(a) or not _amount_present(b):
+    left = _parse_amount(a)
+    right = _parse_amount(b)
+    if left is None or right is None:
         return False
-    return abs(float(a) - float(b)) < AMOUNT_EPSILON
+    return abs(left - right) < AMOUNT_EPSILON
 
 
 def _matching_cfg(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -116,18 +126,21 @@ def _candidate_matches(
         return False
     matching = _matching_cfg(cfg)
     if matching.get("require_account_last4_match", True):
-        ocr_last4 = str(ocr.get("receiver_account_last4") or "")
-        order_last4 = str(order.get("account_last4") or "")
-        if ocr_last4 != order_last4:
+        ocr_last4 = str(ocr.get("receiver_account_last4") or "").replace(" ", "")[-4:]
+        order_last4 = str(order.get("account_last4") or "").replace(" ", "")[-4:]
+        # DOM scrapes often omit last4; only enforce when the order carries one.
+        if order_last4 and ocr_last4 != order_last4:
+            return False
+        if order_last4 and not ocr_last4:
             return False
     if matching.get("require_bank_match", True):
         # Payee/member bank only. Skip when OCR has no receiver bank so older
-        # APKs without that field still match on amount+last4.
+        # APKs without that field still match on amount+last4. Also skip when
+        # the scraped order has no bank (amount-only scrape).
         ocr_bank = _ocr_receiver_bank(ocr)
-        if ocr_bank:
-            order_bank = _order_bank(order)
-            if not order_bank or not _banks_match(ocr_bank, order_bank):
-                return False
+        order_bank = _order_bank(order)
+        if ocr_bank and order_bank and not _banks_match(ocr_bank, order_bank):
+            return False
     return True
 
 
@@ -174,10 +187,13 @@ def should_auto_confirm(
     if not ac.get("enabled", False):
         return False
 
-    confidence = float(ocr.get("ocr_confidence") or 0.0)
-    min_conf = float(ac.get("min_ocr_confidence") or 0.0)
-    if confidence < min_conf:
-        return False
+    confidence_raw = ocr.get("ocr_confidence")
+    if confidence_raw is not None and str(confidence_raw).strip() != "":
+        confidence = float(confidence_raw)
+        min_conf = float(ac.get("min_ocr_confidence") or 0.0)
+        if confidence < min_conf:
+            return False
+    # Missing confidence: allow when master switch is on (older payloads).
 
     review = ac.get("require_manual_review") or {}
     if review.get("enabled", False):

@@ -216,6 +216,16 @@
     if (!selector) return [];
 
     const amountRe = /[\d,]+\.\d{2}/;
+    const accountRe = /\b(\d{9,12})\b/g;
+    const bankNeedles = [
+      ['KBANK', ['กสิกร', 'kasikorn', 'kbank', 'k+']],
+      ['SCB', ['ไทยพาณิชย์', 'scb', 'siam commercial']],
+      ['BBL', ['กรุงเทพ', 'bangkok bank', 'bbl']],
+      ['KTB', ['กรุงไทย', 'krungthai', 'ktb']],
+      ['GSB', ['ออมสิน', 'gsb', 'mymo']],
+      ['TTB', ['ทหารไทย', 'ธนชาต', 'ttb']],
+      ['BAY', ['กรุงศรี', 'bay', 'krungsri']],
+    ];
     const rows = [...document.querySelectorAll(selector)];
     const orders = [];
 
@@ -224,8 +234,9 @@
       const amountMatch = text.match(amountRe);
       if (!amountMatch) continue;
 
-      const refCandidates = deepFindByText(row, normalize(text.replace(amountMatch[0], '')));
+      const cells = [...row.querySelectorAll('td')];
       let ref = null;
+      const refCandidates = deepFindByText(row, normalize(text.replace(amountMatch[0], '')));
       for (const hit of refCandidates.length ? refCandidates : [row]) {
         const normalized = normalize(hit.textContent || '');
         if (normalized.length >= 4) {
@@ -233,16 +244,40 @@
           break;
         }
       }
-
-      const cells = [...row.querySelectorAll('td')];
       if (!ref && cells.length > 0) ref = (cells[0].textContent || '').trim();
 
-      if (ref) {
-        orders.push({
-          ref: ref.replace(/\s+/g, ' ').trim(),
-          amount: amountMatch[0],
-        });
+      // Member account: prefer a long digit run that is not the amount.
+      const amountDigits = amountMatch[0].replace(/\D/g, '');
+      let account = '';
+      let m;
+      accountRe.lastIndex = 0;
+      while ((m = accountRe.exec(text)) !== null) {
+        const digits = m[1];
+        if (digits === amountDigits) continue;
+        if (digits.length >= account.length) account = digits;
       }
+
+      let bank = '';
+      const lower = text.toLowerCase();
+      for (const [code, aliases] of bankNeedles) {
+        if (aliases.some((a) => lower.includes(String(a).toLowerCase()) || text.includes(a))) {
+          bank = code;
+          break;
+        }
+      }
+
+      const accountLast4 = account ? account.slice(-4) : '';
+      const orderId = (ref || '').replace(/\s+/g, ' ').trim() || (account ? `acct:${account}` : '');
+      if (!orderId && !amountMatch[0]) continue;
+
+      orders.push({
+        ref: orderId,
+        order_id: orderId,
+        amount: amountMatch[0],
+        account: account || undefined,
+        account_last4: accountLast4 || undefined,
+        bank: bank || undefined,
+      });
     }
     return orders;
   }
@@ -359,8 +394,12 @@
   /**
    * Dismiss a success/confirm dialog (SweetAlert2 on Jinbao, Element UI, plain popups).
    * SweetAlert2 success is closed via MAIN-world injection + native click, and is
-   * considered done ONLY when `.swal2-container` is gone from the document.
-   * Never returns already_gone / ok while `.swal2-container` still exists.
+   * considered done ONLY when the tracked `.swal2-container` is gone from the document.
+   * Never returns already_gone / ok while the tracked container still exists.
+   *
+   * One dismiss step closes ONE dialog: a popup that mounts in response to our own
+   * click (Jinbao's success SweetAlert2 after the save-confirm) is reported via
+   * `saw_success` and left on screen for the next workflow step to verify.
    */
   async function dismissMessageBox(step, context, doc) {
     const document = getDocument(doc);
@@ -380,6 +419,17 @@
       .filter(Boolean);
     const timeout = step.timeout_ms || 10000;
     const start = Date.now();
+    let dismissedCount = 0;
+    let sawSuccess = false;
+    let dismissedSuccess = false;
+    // Every exit carries what this step observed so later steps can trust it even
+    // when the success dialog is gone by the time they look.
+    const finish = (result) => ({
+      dismissed_count: dismissedCount,
+      saw_success: sawSuccess,
+      dismissed_success: dismissedSuccess,
+      ...result,
+    });
     // Requirement: visible even when DevTools filter = Errors only (warn/log hidden).
     const warn = (...args) => {
       try {
@@ -442,7 +492,21 @@
 
     const successStillVisible = () => {
       const hay = document.body ? document.body.textContent || '' : '';
-      return successHints.some((h) => h && hay.includes(h));
+      const hit = successHints.some((h) => h && hay.includes(h));
+      if (hit) sawSuccess = true;
+      return hit;
+    };
+
+    /** Does this popup carry the close-job success message (or SweetAlert2's success icon)? */
+    const nodeIsSuccess = (node) => {
+      if (!node) return false;
+      try {
+        if (node.querySelector && node.querySelector('.swal2-icon-success')) return true;
+      } catch (_) {
+        /* ignore */
+      }
+      const text = node.textContent || '';
+      return successHints.some((h) => h && text.includes(h));
     };
 
     /** Rank NON-swal OK buttons — BootstrapVue save-confirm / Element UI MessageBox. */
@@ -522,15 +586,32 @@
       return false;
     };
 
-    // --- SweetAlert2 path: MAIN-world inject + native click, done when container gone.
-    const dismissSwal = async () => {
+    // --- SweetAlert2 path: MAIN-world inject + native click, done when the container
+    // we bound to is gone. A container that mounts afterwards belongs to the next step.
+    const dismissSwal = async (bound) => {
+      const container = bound || swalContainerInDom();
+      if (!container) {
+        return finish({ ok: true, dismissed: false, already_gone: true, via: 'swal2' });
+      }
+      let isSuccess = nodeIsSuccess(container);
+      if (isSuccess) sawSuccess = true;
+      const boundGone = () => !document.body.contains(container);
+      const closed = () => {
+        dismissedCount += 1;
+        if (isSuccess) dismissedSuccess = true;
+        return finish({ ok: true, dismissed: true, via: 'swal2' });
+      };
+
       while (Date.now() - start < timeout) {
-        const container = swalContainerInDom();
-        if (!container) {
+        if (boundGone()) {
           warn('swal container gone — done');
-          return { ok: true, dismissed: true, via: 'swal2' };
+          return closed();
         }
-        const btn = swalConfirmBtn();
+        if (!isSuccess && nodeIsSuccess(container)) {
+          isSuccess = true;
+          sawSuccess = true;
+        }
+        const btn = container.querySelector('button.swal2-confirm') || swalConfirmBtn();
         warn('swal poll', {
           ms: Date.now() - start,
           hasContainer: true,
@@ -569,14 +650,14 @@
         }
 
         await sleep(150);
-        // Never report success while the container is still present.
-        if (!swalContainerInDom()) {
+        // Never report success while the tracked container is still present.
+        if (boundGone()) {
           warn('swal container gone after click — done');
-          return { ok: true, dismissed: true, via: 'swal2' };
+          return closed();
         }
       }
       warn('swal timeout — container still present', { lastReason: 'dismiss_dialog_still_open' });
-      return { ok: false, reason: 'dismiss_dialog_still_open' };
+      return finish({ ok: false, reason: 'dismiss_dialog_still_open' });
     };
 
     let lastReason = 'dismiss_dialog_not_found';
@@ -584,9 +665,10 @@
     try {
       while (Date.now() - start < timeout) {
         // SweetAlert2 always wins — handle it exclusively via the MAIN-world path.
-        if (swalContainerInDom()) {
+        const openSwal = swalContainerInDom();
+        if (openSwal) {
           sawDialog = true;
-          return await dismissSwal();
+          return await dismissSwal(openSwal);
         }
 
         const cands = findOkButtons();
@@ -609,7 +691,7 @@
           // we ever saw a dialog (Jinbao: toast text can flicker then Swal mounts late).
           if (sawDialog && !successStillVisible() && !swalContainerInDom()) {
             warn('done already_gone after prior dialog');
-            return { ok: true, dismissed: true, already_gone: true };
+            return finish({ ok: true, dismissed: true, already_gone: true });
           }
           lastReason = successStillVisible() ? 'waiting_for_swal_or_ok' : 'dismiss_dialog_not_found';
           await sleep(120);
@@ -640,14 +722,20 @@
 
         const until = Date.now() + 3500;
         while (Date.now() < until) {
-          // A SweetAlert2 popup may mount right after this click — switch to swal path.
-          if (swalContainerInDom()) {
-            warn('swal appeared after click — switching to swal path');
-            return await dismissSwal();
+          // Our click answered the confirm and the site mounted its success popup.
+          // That popup is the NEXT step's job — dismissing it here is what made
+          // step 13 look for success text that we had already thrown away.
+          const newSwal = swalContainerInDom();
+          if (newSwal) {
+            dismissedCount += 1;
+            if (nodeIsSuccess(newSwal)) sawSuccess = true;
+            warn('swal mounted after click — leaving it for the next step');
+            return finish({ ok: true, dismissed: true, via, left_open: 'swal2' });
           }
           if (!dialogStillOpen(btn, root)) {
+            dismissedCount += 1;
             warn('closed ok', { via });
-            return { ok: true, dismissed: true, via };
+            return finish({ ok: true, dismissed: true, via });
           }
           await sleep(100);
         }
@@ -658,10 +746,10 @@
       // Final guard: never report success while a Swal container remains.
       if (swalContainerInDom()) {
         warn('timeout — swal container still present');
-        return { ok: false, reason: 'dismiss_dialog_still_open' };
+        return finish({ ok: false, reason: 'dismiss_dialog_still_open' });
       }
       warn('timeout', { lastReason, sawDialog });
-      return { ok: false, reason: lastReason };
+      return finish({ ok: false, reason: lastReason });
     } finally {
       restoreDialogs();
     }
@@ -2201,6 +2289,19 @@
     return /ยืนยัน|บันทึก|ตกลง|submit|confirm/i.test(text);
   }
 
+  /** True once a dismiss step reported the close-job success message. */
+  function successObserved(context) {
+    return Boolean(context && context.observed && context.observed.success);
+  }
+
+  /** Record a success sighting so later steps do not need the dialog to still be there. */
+  function noteObservation(context, result) {
+    if (!context || !result) return;
+    if (!result.saw_success && !result.dismissed_success && !result.verified) return;
+    context.observed = context.observed || {};
+    context.observed.success = true;
+  }
+
   async function runWorkflowStep(step, stepIndex, profile, context, doc, options) {
     const document = getDocument(doc);
     const dryRun = options.dry_run !== false && profile.dry_run !== false;
@@ -2233,15 +2334,20 @@
         return { ok: true };
       }
       case 'wait_for': {
+        // The success dialog may already be dismissed by the time we look — a step
+        // that only re-checks success must not fail on text we already saw.
+        if (successObserved(context)) return { ok: true, satisfied_by: 'success_observed' };
         const timeout = step.timeout_ms || 10000;
         const hints = step.selector_hints || POPUP_SCOPE_HINTS;
         const start = Date.now();
         while (Date.now() - start < timeout) {
           const root = findScopeRoot(step, context, document);
           if (step.match_text) {
-            const hit = [...root.querySelectorAll('*')].some((el) => textMatches(el, step.match_text));
+            const hit = [...root.querySelectorAll('*')].some(
+              (el) => textMatches(el, step.match_text) && (!step.require_visible || isVisible(el))
+            );
             if (hit) return { ok: true };
-          } else if (queryByHints(root, hints).length > 0) {
+          } else if (queryByHints(root, hints).some((el) => !step.require_visible || isVisible(el))) {
             return { ok: true };
           }
           await new Promise((r) => setTimeout(r, 50));
@@ -2257,6 +2363,7 @@
       case 'verify_or_fill':
         return verifyOrFill(step, context, document);
       case 'verify_result':
+        if (successObserved(context)) return { ok: true, verified: true, satisfied_by: 'success_observed' };
         return verifyResult(step, context, document);
       case 'dismiss_dialog':
         if (dryRun && outlineOnly) {
@@ -2274,9 +2381,69 @@
     }
   }
 
+  /** Any blocking popup still on screen? Used before trusting the order list. */
+  function anyDialogOpen(doc) {
+    const document = getDocument(doc);
+    if (!document || !document.querySelector) return false;
+    if (document.querySelector('.swal2-container')) return true;
+    let nodes = [];
+    try {
+      nodes = [
+        ...document.querySelectorAll(
+          '.modal.show, .modal[style*="display: block"], .el-message-box__wrapper, [role="dialog"], [role="alertdialog"]'
+        ),
+      ];
+    } catch (_) {
+      return false;
+    }
+    return nodes.some((n) => isVisible(n));
+  }
+
+  /**
+   * Re-find the order row from the live DOM. `context.row` is detached once the
+   * site re-renders the list, so post-submit checks must look it up again.
+   */
+  function refindContextRow(profile, context, doc) {
+    const slip = (context && context.slip) || {};
+    const keys = [context && context.matchKey, slip.ref_number, slip.amount].filter(
+      (k) => k != null && String(k) !== ''
+    );
+    if (!keys.length) return { status: 'row_not_found' };
+    const hints = {
+      account_last4: slip.receiver_account_last4 || '',
+      bank: slip.receiver_bank || slip.receiver_bank_name_th || '',
+    };
+    for (const key of keys) {
+      const res = findRow(profile, key, doc, hints);
+      // Ambiguous stays ambiguous — never guess which row was closed.
+      if (res.status === 'ok' || res.status === 'ambiguous') return res;
+    }
+    return { status: 'row_not_found' };
+  }
+
+  /**
+   * The site closed the job but the workflow lost sight of the proof (dialog eaten,
+   * list re-rendered). Only treat that as success on hard evidence.
+   */
+  function postSubmitSuccessFallback(profile, context, doc) {
+    if (successObserved(context)) {
+      return { ok: true, verified: true, reason: 'already_confirmed', via: 'success_observed' };
+    }
+    const document = getDocument(doc);
+    if (!document || anyDialogOpen(document)) return null;
+    const indicators = profile.row_approved_indicators || [];
+    if (!indicators.length) return null;
+    const res = refindContextRow(profile, context, document);
+    if (res.status !== 'ok') return null;
+    const text = res.row.textContent || '';
+    if (!indicators.some((k) => k && text.includes(k))) return null;
+    return { ok: true, verified: true, reason: 'already_confirmed', via: 'row_approved' };
+  }
+
   async function runWorkflow(profile, steps, context, options) {
     const opts = options || {};
     const doc = opts.document || getDocument();
+    const ctx = context || {};
     const list = Array.isArray(steps) ? steps : profile.close_job_workflow || [];
     const stepLog = (...args) => {
       try {
@@ -2288,12 +2455,21 @@
     };
 
     stepLog('start', list.length, 'steps');
+    let submitted = false;
     for (let i = 0; i < list.length; i++) {
       const step = list[i] || {};
       stepLog('step', i, step.action, step.match_text || step.field_hint || '');
-      const result = await runWorkflowStep(step, i, profile, context || {}, doc, opts);
+      const result = await runWorkflowStep(step, i, profile, ctx, doc, opts);
+      noteObservation(ctx, result);
       stepLog('step_done', i, step.action, result && result.ok, result && result.reason);
       if (!result.ok) {
+        if (submitted && result.reason !== 'dry_run') {
+          const fallback = postSubmitSuccessFallback(profile, ctx, doc);
+          if (fallback) {
+            stepLog('post_submit fallback', i, fallback.via);
+            return { ...fallback, failed_step: i, failed_reason: result.reason || 'step_failed' };
+          }
+        }
         return {
           ok: false,
           failed_step: i,
@@ -2301,6 +2477,7 @@
           ...result,
         };
       }
+      if (isSubmitStep(step)) submitted = true;
     }
     // Final safety: never report success while SweetAlert2 is still on screen.
     const document = getDocument(doc);
@@ -2308,9 +2485,10 @@
       stepLog('swal still open after workflow — force dismiss');
       const last = await dismissMessageBox(
         { action: 'dismiss_dialog', match_text: 'ตกลง|OK', timeout_ms: 10000 },
-        context || {},
+        ctx,
         doc
       );
+      noteObservation(ctx, last);
       if (!last.ok || (document.querySelector && document.querySelector('.swal2-container'))) {
         return {
           ok: false,

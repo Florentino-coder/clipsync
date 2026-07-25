@@ -135,7 +135,11 @@ async def test_normal_event_calls_confirm(tmp_path: Path):
     result = await orch.handle_slip_event(EVENT, source="usb")
     await reply_task
 
-    bridge.push_confirm_order.assert_awaited_once_with("1234")
+    bridge.push_confirm_order.assert_awaited_once()
+    call = bridge.push_confirm_order.await_args
+    assert call.args[0] == "1234"
+    assert call.kwargs.get("amount") in (350.0, "350.00")
+    assert isinstance(call.kwargs.get("slip"), dict)
     assert result["decision"] == "auto_confirmed"
     audits = _audit_lines(tmp_path / "audit.jsonl")
     assert any(a.get("decision") == "auto_confirmed" for a in audits)
@@ -223,7 +227,8 @@ async def test_relay_valid_hmac_proceeds(tmp_path: Path):
     t = asyncio.create_task(_reply())
     result = await orch.handle_slip_event(EVENT, source="relay", sig=_sig(EVENT))
     await t
-    bridge.push_confirm_order.assert_awaited_once_with("1234")
+    bridge.push_confirm_order.assert_awaited_once()
+    assert bridge.push_confirm_order.await_args.args[0] == "1234"
     assert result["decision"] == "auto_confirmed"
 
 

@@ -240,6 +240,7 @@ describe('deepFindByText + findRow + findConfirmButton', () => {
     const first = orders.find((o) => o.ref.includes('ORD1001'));
     assert.ok(first);
     assert.match(first.amount, /1,250\.00/);
+    assert.equal(first.order_id, first.ref);
   });
 });
 
@@ -1443,5 +1444,258 @@ describe('dismiss_dialog closes Element UI MessageBox', () => {
     assert.equal(res.ok, true, JSON.stringify(res));
     assert.ok(ok >= 1, 'must click confirm ตกลง');
     assert.equal(cancel, 0, 'must not click ยกเลิก');
+  });
+});
+
+describe('post-submit success when dismiss ate the success dialog', () => {
+  it('workflow still ok if step12 dismissed success Swal before wait_for', async () => {
+    // Minimal close-job tail: dismiss (eats success) → wait_for success → verify.
+    document.body.innerHTML = `
+      <table><tbody>
+        <tr class="el-table__row" id="row1">
+          <td>0971572720</td>
+          <td>1,097.00</td>
+          <td>อนุมัติ</td>
+        </tr>
+      </tbody></table>
+      <div class="swal2-container">
+        <div class="swal2-popup">
+          <div class="swal2-html-container">บันทึก รายการถอน สำเร็จ</div>
+          <button class="swal2-confirm">ตกลง</button>
+        </div>
+      </div>
+    `;
+    const swal = document.querySelector('.swal2-container');
+    document.querySelector('.swal2-confirm').addEventListener('click', () => swal.remove());
+
+    const profile = {
+      ...PROFILE,
+      dry_run: false,
+      row_approved_indicators: ['อนุมัติ'],
+      close_job_workflow: [
+        { action: 'click', match_text: 'บันทึก' }, // not present — we start mid-flow via custom steps
+      ],
+    };
+    // Drive only the post-save steps with a pre-marked submitted context via runWorkflow steps:
+    const steps = [
+      { action: 'dismiss_dialog', match_text: 'ตกลง|OK', timeout_ms: 2000 },
+      {
+        action: 'wait_for',
+        match_text: 'บันทึก รายการถอน สำเร็จ|รายการถอน สำเร็จ',
+        satisfied_by: 'success_observed',
+        timeout_ms: 500,
+      },
+      {
+        action: 'verify_result',
+        indicators: ['บันทึก รายการถอน สำเร็จ', 'รายการถอน สำเร็จ'],
+        satisfied_by: 'success_observed',
+        timeout_ms: 500,
+      },
+    ];
+    // Inject a fake submit step first so postSubmitSuccessFallback is allowed if needed.
+    const fullSteps = [
+      {
+        action: 'click',
+        match_text: 'dummy-submit-บันทึก',
+        selector_hints: ['#row1'],
+      },
+      ...steps,
+    ];
+    // Make the dummy click succeed by giving the row a button labeled บันทึก
+    const btn = document.createElement('button');
+    btn.textContent = 'dummy-submit-บันทึก';
+    document.getElementById('row1').appendChild(btn);
+
+    const result = await runWorkflow(
+      { ...profile, close_job_workflow: fullSteps },
+      fullSteps,
+      { row: document.getElementById('row1'), slip: { amount: '1097.00' }, matchKey: '1097.00' },
+      { dry_run: false, document }
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.verified, true);
+  });
+});
+
+describe('close-job tail after a successful Jinbao save', () => {
+  const TAIL_PROFILE = {
+    ...PROFILE,
+    dry_run: false,
+    row_selector_hints: ['tr.el-table__row', 'tbody tr', 'tr'],
+    row_approved_indicators: ['อนุมัติ'],
+  };
+
+  const TAIL_STEPS = [
+    { action: 'click', match_text: 'บันทึก', selector_hints: ['#save'] },
+    { action: 'wait_for', match_text: 'ยืนยันการถอนรายการ', require_visible: true, timeout_ms: 1000 },
+    { action: 'dismiss_dialog', match_text: 'ตกลง|OK', timeout_ms: 1500 },
+    {
+      action: 'wait_for',
+      match_text: 'บันทึก รายการถอน สำเร็จ|รายการถอน สำเร็จ',
+      satisfied_by: 'success_observed',
+      timeout_ms: 300,
+    },
+    {
+      action: 'verify_result',
+      indicators: ['บันทึก รายการถอน สำเร็จ'],
+      satisfied_by: 'success_observed',
+      timeout_ms: 300,
+    },
+    { action: 'dismiss_dialog', match_text: 'ตกลง|OK', timeout_ms: 300 },
+  ];
+
+  const successSwalHtml =
+    '<div class="swal2-popup swal2-icon-success">' +
+    '<div class="swal2-html-container">บันทึก รายการถอน สำเร็จ</div>' +
+    '<button type="button" class="swal2-confirm" id="swal-ok">ตกลง</button>' +
+    '</div>';
+
+  /**
+   * @param {object} opts
+   * @param {string} [opts.rowStatus] status cell text after the confirm click
+   * @param {boolean} [opts.mountSuccess] mount the success Swal on confirm (and keep it)
+   * @param {boolean} [opts.skipConfirm] save goes straight to the success Swal
+   * @param {boolean} [opts.duplicateRow] add a second row with the same amount
+   */
+  function buildPage(opts) {
+    const extraRow = opts.duplicateRow
+      ? '<tr class="el-table__row" id="row2"><td>0999999999</td><td>1,097.00</td><td class="status">รอตรวจสอบ</td></tr>'
+      : '';
+    const dom = new JSDOM(`<!doctype html><body>
+      <table><tbody>
+        <tr class="el-table__row" id="row1">
+          <td>0971572720</td><td>1,097.00</td><td class="status">รอตรวจสอบ</td>
+        </tr>
+        ${extraRow}
+      </tbody></table>
+      <div class="card" id="form">
+        โอนเงินทางบัญชี
+        <button type="button" class="btn btn-primary" id="save">บันทึก</button>
+      </div>
+    </body>`);
+    global.document = dom.window.document;
+
+    const settleRow = () => {
+      // Site re-renders the list; context.row is detached from here on.
+      for (const cell of document.querySelectorAll('.status')) {
+        cell.textContent = opts.rowStatus || 'รอตรวจสอบ';
+      }
+    };
+
+    document.getElementById('save').addEventListener('click', () => {
+      if (opts.skipConfirm) {
+        const swal = document.createElement('div');
+        swal.className = 'swal2-container';
+        swal.id = 'swal-root';
+        swal.innerHTML = successSwalHtml;
+        document.body.appendChild(swal);
+        document.getElementById('swal-ok').addEventListener('click', () => {
+          swal.remove();
+          settleRow();
+        });
+        return;
+      }
+      const confirmModal = document.createElement('div');
+      confirmModal.className = 'modal show';
+      confirmModal.id = 'confirm-modal';
+      confirmModal.setAttribute('style', 'display: block;');
+      confirmModal.innerHTML =
+        '<div class="modal-header">ยืนยันการถอนรายการ</div>' +
+        '<div class="modal-body">คุณแน่ใจใช่ไหมที่จะบันทึกรายการตอนนี้ ?</div>' +
+        '<div class="modal-footer">' +
+        '<button type="button" class="btn" id="cancel-btn">ยกเลิก</button>' +
+        '<button type="button" class="btn btn-primary" id="confirm-ok">ตกลง</button>' +
+        '</div>';
+      document.body.appendChild(confirmModal);
+      document.getElementById('confirm-ok').addEventListener('click', () => {
+        confirmModal.remove();
+        if (opts.mountSuccess) {
+          const swal = document.createElement('div');
+          swal.className = 'swal2-container';
+          swal.id = 'swal-root';
+          swal.innerHTML = successSwalHtml;
+          document.body.appendChild(swal);
+        }
+        settleRow();
+      });
+    });
+    return dom;
+  }
+
+  const run = (steps, profile) =>
+    runWorkflow(
+      profile || TAIL_PROFILE,
+      steps || TAIL_STEPS,
+      {
+        row: document.getElementById('row1'),
+        slip: { amount: '1097.00' },
+        matchKey: '1097.00',
+      },
+      { dry_run: false, document }
+    );
+
+  it('leaves the success Swal mounted by its own click for the next step', async () => {
+    buildPage({ rowStatus: 'อนุมัติ', mountSuccess: true });
+    document.getElementById('save').click();
+
+    const res = await dismissMessageBox(
+      { action: 'dismiss_dialog', match_text: 'ตกลง|OK', timeout_ms: 1500 },
+      {},
+      document
+    );
+
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(res.dismissed_count, 1, 'one dismiss step closes one dialog');
+    assert.equal(res.left_open, 'swal2');
+    assert.equal(res.saw_success, true);
+    assert.equal(!!document.getElementById('confirm-modal'), false, 'confirm must be closed');
+    assert.ok(document.querySelector('.swal2-container'), 'success Swal must survive step 12');
+  });
+
+  it('reports success when the dismiss step ate both dialogs (row shows อนุมัติ)', async () => {
+    buildPage({ rowStatus: 'อนุมัติ', mountSuccess: false });
+    const result = await run();
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.verified, true);
+    assert.equal(result.reason, 'already_confirmed');
+    assert.equal(result.via, 'row_approved');
+    assert.equal(result.failed_step, 3, 'wait_for is the step that lost the success text');
+  });
+
+  it('reports success from the dialog it dismissed, even if the list never shows อนุมัติ', async () => {
+    // Worst case: one dismiss step both saw and closed the success Swal, and the
+    // list row is still 'รอตรวจสอบ' — only the observation proves the job closed.
+    buildPage({ rowStatus: 'รอตรวจสอบ', skipConfirm: true });
+    const steps = [
+      TAIL_STEPS[0],
+      { action: 'dismiss_dialog', match_text: 'ตกลง|OK', timeout_ms: 1500 },
+      TAIL_STEPS[3],
+      TAIL_STEPS[4],
+      TAIL_STEPS[5],
+    ];
+
+    const result = await run(steps);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.reason, 'already_confirmed');
+    assert.equal(result.via, 'success_observed');
+    assert.equal(result.failed_step, 4, 'the trailing dismiss has nothing left to close');
+  });
+
+  it('still fails when the row was never approved', async () => {
+    buildPage({ rowStatus: 'รอตรวจสอบ', mountSuccess: false });
+    const result = await run(null);
+
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'wait_for_timeout');
+    assert.equal(result.failed_step, 3);
+  });
+
+  it('still fails when the approved row is ambiguous', async () => {
+    buildPage({ rowStatus: 'อนุมัติ', mountSuccess: false, duplicateRow: true });
+    const result = await run();
+
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'wait_for_timeout');
   });
 });

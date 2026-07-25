@@ -17,7 +17,7 @@ from clipsync.seen_events import SeenEvents, default_seen_events_path
 
 logger = logging.getLogger(__name__)
 
-CONFIRM_TIMEOUT_DEFAULT = 15.0
+CONFIRM_TIMEOUT_DEFAULT = 60.0
 
 SendAckCallback = Callable[[str], Awaitable[None] | None]
 
@@ -55,19 +55,26 @@ def _normalize_order(order: Mapping[str, Any]) -> dict[str, Any]:
     order_id = order.get("order_id")
     if order_id is None:
         order_id = order.get("orderId")
+    # DOM scrape uses ``ref`` as the row key when no explicit order_id exists.
+    if order_id is None or str(order_id).strip() == "":
+        order_id = order.get("ref")
     last4 = order.get("account_last4")
     if last4 is None:
         last4 = order.get("accountLast4")
     if last4 is None:
         acct = order.get("member_bank_account") or order.get("account") or ""
-        last4 = str(acct)[-4:] if acct else ""
+        digits = "".join(ch for ch in str(acct) if ch.isdigit())
+        last4 = digits[-4:] if len(digits) >= 4 else ""
+    else:
+        digits = "".join(ch for ch in str(last4) if ch.isdigit())
+        last4 = digits[-4:] if digits else ""
     bank = order.get("bank")
     if bank is None:
         bank = order.get("bank_name") or order.get("bank_name_th") or order.get("member_bank")
     return {
-        "order_id": str(order_id) if order_id is not None else "",
+        "order_id": str(order_id).strip() if order_id is not None else "",
         "amount": order.get("amount"),
-        "account_last4": str(last4) if last4 is not None else "",
+        "account_last4": str(last4) if last4 else "",
         "bank": str(bank).strip() if bank is not None and str(bank).strip() else "",
     }
 
@@ -138,15 +145,27 @@ class SlipOrchestrator:
         try:
             if not isinstance(data, Mapping):
                 return
-            order_id = data.get("orderId")
-            if order_id is None:
-                order_id = data.get("order_id")
-            if order_id is None:
-                return
-            key = str(order_id)
-            fut = self._confirm_waiters.get(key)
-            if fut is not None and not fut.done():
-                fut.set_result(dict(data))
+            candidates: list[str] = []
+            for key in ("orderId", "order_id", "matchKey", "amount"):
+                val = data.get(key)
+                if val is None or str(val).strip() in ("", "-", "None"):
+                    continue
+                text = str(val).strip()
+                candidates.append(text)
+                # Amount may arrive as 1097 / 1097.0 / 1,097.00 — normalize.
+                try:
+                    candidates.append(f"{float(text.replace(',', '')):.2f}")
+                except (TypeError, ValueError):
+                    pass
+            seen: set[str] = set()
+            for key in candidates:
+                if key in seen:
+                    continue
+                seen.add(key)
+                fut = self._confirm_waiters.get(key)
+                if fut is not None and not fut.done():
+                    fut.set_result(dict(data))
+                    return
         except Exception:
             logger.exception("on_confirm_result failed")
 
@@ -193,12 +212,39 @@ class SlipOrchestrator:
             return result
 
         assert matched is not None
-        order_id = str(matched["order_id"])
+        order_id = str(matched.get("order_id") or "").strip()
+        # Extension finds the Jinbao row by orderId OR amount OR ref; amount+slip
+        # are required for same-amount disambiguation (same path as manual confirm).
+        amount = event.get("amount")
+        amount_key = ""
+        try:
+            if amount is not None and str(amount).strip() != "":
+                amount_key = f"{float(str(amount).replace(',', '')):.2f}"
+        except (TypeError, ValueError):
+            amount_key = ""
+        # Prefer a non-empty id for confirm_result correlation; fall back to amount.
+        push_id = order_id or amount_key
+        if not push_id:
+            result = self._audit_and_return(
+                event, matched, "pending_review", confirmed_by=None
+            )
+            await self._emit_ack(event_id)
+            return result
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self._confirm_waiters[order_id] = fut
+        waiter_keys = {push_id}
+        if amount_key:
+            waiter_keys.add(amount_key)
+        for key in waiter_keys:
+            self._confirm_waiters[key] = fut
         try:
-            await self._bridge.push_confirm_order(order_id)
+            await self._bridge.push_confirm_order(
+                push_id,
+                amount=amount_key or amount,
+                ref_number=event.get("ref_number"),
+                slip=dict(event),
+                event_id=event_id,
+            )
             try:
                 result = await asyncio.wait_for(fut, timeout=self._confirm_timeout)
             except asyncio.TimeoutError:
@@ -208,7 +254,10 @@ class SlipOrchestrator:
                 await self._emit_ack(event_id)
                 return out
 
-            if result.get("ok") and result.get("verified") is True:
+            if result.get("ok") and (
+                result.get("verified") is True
+                or result.get("reason") in (None, "", "ok", "already_confirmed")
+            ):
                 ref = event.get("ref_number")
                 if ref is not None:
                     self._used_refs.add(str(ref))
@@ -227,7 +276,10 @@ class SlipOrchestrator:
             await self._emit_ack(event_id)
             return out
         finally:
-            self._confirm_waiters.pop(order_id, None)
+            for key in waiter_keys:
+                # Only drop if still pointing at this future (avoid clobbering a newer wait).
+                if self._confirm_waiters.get(key) is fut:
+                    self._confirm_waiters.pop(key, None)
 
     def _audit_and_return(
         self,
