@@ -10,10 +10,10 @@
     "notes": "OCR confidence is soft when amount parsed (fix low_ocr_confidence blocking SCB auto-confirm); audit now records ocr_confidence/parse_failed/sender_last4."
   },
   "android": {
-    "version": "0.9.4+25",
+    "version": "0.9.5+26",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "Slip capture: request Photos permission while switch is locked busy so Allow tap cannot flip it OFF."
+    "notes": "Fix hang on Slip Capture OFF / Stop Sync: timeout cleanup (WS/EventChannel/server), always clear Please wait, Force Stop if stuck."
   },
   "extension": {
     "version": "1.0.36",

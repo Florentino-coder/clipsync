@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'clip_service.dart';
+import 'async_guard.dart';
 import 'license/license_gate.dart';
 import 'license/license_service.dart';
 import 'slip/slip_bootstrap.dart';
@@ -96,7 +97,11 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _slipEnabled = false;
         });
-        await _stopSlipStack();
+        _addEvent('Slip capture stopping...');
+        await awaitGuardedVoid(
+          _stopSlipStack(),
+          timeout: const Duration(seconds: 6),
+        );
         _addEvent('Slip capture OFF');
         return;
       }
@@ -113,7 +118,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _slipEnabled = true;
       });
       _addEvent('Slip capture ON');
-      await _maybeStartSlipStack();
+      await awaitGuardedVoid(
+        _maybeStartSlipStack(),
+        timeout: const Duration(seconds: 15),
+      );
       if (_slipBootstrap == null) {
         _addEvent('Slip: need QR with secret + Start Sync first');
       }
@@ -122,6 +130,8 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _busy = false;
         });
+      } else {
+        _busy = false;
       }
     }
   }
@@ -151,7 +161,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final bootstrap = _slipBootstrap;
     _slipBootstrap = null;
     if (bootstrap != null) {
-      await bootstrap.stop();
+      await awaitGuardedVoid(
+        bootstrap.stop(),
+        timeout: const Duration(seconds: 5),
+      );
     }
   }
 
@@ -341,29 +354,78 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _stop() async {
-    if (_busy) return;
+  Future<void> _stop({bool force = false}) async {
+    if (_busy && !force) return;
+
+    // Second press while hung: abandon refs and clear UI immediately.
+    if (_busy && force) {
+      _slipBootstrap = null;
+      _fallbackRetryTimer?.cancel();
+      _fallbackRetryTimer = null;
+      _fallbackHeartbeatTimer?.cancel();
+      _fallbackHeartbeatTimer = null;
+      final hungWs = _fallbackWs;
+      _fallbackWs = null;
+      unawaited(awaitGuardedVoid(
+        hungWs?.close(),
+        timeout: const Duration(seconds: 1),
+      ));
+      unawaited(awaitGuardedVoid(
+        FlutterForegroundTask.stopService(),
+        timeout: const Duration(seconds: 3),
+      ));
+      _addEvent('Force stopped');
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _running = false;
+          _pcOnline = false;
+          _fallbackActive = false;
+          _status = 'Stopped';
+        });
+      } else {
+        _busy = false;
+        _running = false;
+        _pcOnline = false;
+        _fallbackActive = false;
+      }
+      return;
+    }
+
     setState(() {
       _busy = true;
       _status = 'Stopping...';
     });
     try {
-      await FlutterForegroundTask.stopService();
-      await _stopFallbackSocket();
-      await _stopSlipStack();
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      _addEvent('Stopping...');
+      await awaitGuardedVoid(
+        FlutterForegroundTask.stopService(),
+        timeout: const Duration(seconds: 5),
+      );
+      await awaitGuardedVoid(
+        _stopFallbackSocket(),
+        timeout: const Duration(seconds: 3),
+      );
+      await awaitGuardedVoid(
+        _stopSlipStack(),
+        timeout: const Duration(seconds: 6),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       _addEvent('Stopped');
-      setState(() {
-        _running = false;
-        _pcOnline = false;
-        _fallbackActive = false;
-        _status = 'Stopped';
-      });
     } finally {
       if (mounted) {
         setState(() {
           _busy = false;
+          _running = false;
+          _pcOnline = false;
+          _fallbackActive = false;
+          _status = 'Stopped';
         });
+      } else {
+        _busy = false;
+        _running = false;
+        _pcOnline = false;
+        _fallbackActive = false;
       }
     }
   }
@@ -485,8 +547,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _fallbackHeartbeatTimer = null;
     _fallbackActive = false;
     _fallbackRetryStep = 0;
-    await _fallbackWs?.close();
+    final ws = _fallbackWs;
     _fallbackWs = null;
+    await awaitGuardedVoid(
+      ws?.close(),
+      timeout: const Duration(seconds: 2),
+    );
   }
 
   void _startFallbackHeartbeat(WebSocket ws) {
@@ -743,20 +809,43 @@ class _HomeScreenState extends State<HomeScreen> {
                 width: double.infinity,
                 height: 54,
                 child: FilledButton.icon(
-                  onPressed: _busy ? null : (_running ? _stop : _start),
+                  onPressed: () {
+                    if (_running) {
+                      unawaited(_stop(force: _busy));
+                    } else if (_busy) {
+                      // Stuck after Slip Capture toggle — clear busy + abandon stack.
+                      final bootstrap = _slipBootstrap;
+                      _slipBootstrap = null;
+                      unawaited(awaitGuardedVoid(
+                        bootstrap?.stop(),
+                        timeout: const Duration(seconds: 2),
+                      ));
+                      setState(() {
+                        _busy = false;
+                        _status = 'Ready';
+                      });
+                      _addEvent('Cleared stuck busy state');
+                    } else {
+                      unawaited(_start());
+                    }
+                  },
                   icon: Icon(
-                    _busy
-                        ? Icons.hourglass_top_rounded
-                        : _running
-                            ? Icons.stop_rounded
-                            : Icons.sync_rounded,
+                    _busy && _running
+                        ? Icons.stop_circle_outlined
+                        : _busy
+                            ? Icons.hourglass_top_rounded
+                            : _running
+                                ? Icons.stop_rounded
+                                : Icons.sync_rounded,
                   ),
                   label: Text(
-                    _busy
-                        ? 'Please wait'
-                        : _running
-                            ? 'Stop Sync'
-                            : 'Start Sync',
+                    _busy && _running
+                        ? 'Force Stop'
+                        : _busy
+                            ? 'Please wait'
+                            : _running
+                                ? 'Stop Sync'
+                                : 'Start Sync',
                     style: const TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w700,

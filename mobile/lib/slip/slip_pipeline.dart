@@ -54,6 +54,8 @@ class SlipPipeline {
 
   SlipWatcher get watcher => _watcher;
 
+  SlipOcr get ocr => _ocr;
+
   /// Yields successfully processed slips; skips events that resolve to null.
   Stream<SlipEvent> watchAndProcess() async* {
     await for (final event in _watcher.watch()) {

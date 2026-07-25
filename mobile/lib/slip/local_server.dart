@@ -8,6 +8,7 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_web_socket/shelf_web_socket.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../async_guard.dart';
 import 'outbox.dart';
 import 'slip_event.dart';
 import 'slip_store.dart';
@@ -65,12 +66,20 @@ class LocalSlipServer {
   }
 
   Future<void> stop() async {
-    for (final client in List<WebSocketChannel>.from(_wsClients)) {
-      await client.sink.close();
-    }
+    final clients = List<WebSocketChannel>.from(_wsClients);
     _wsClients.clear();
-    await _server?.close(force: true);
+    for (final client in clients) {
+      await awaitGuardedVoid(
+        client.sink.close(),
+        timeout: const Duration(seconds: 1),
+      );
+    }
+    final server = _server;
     _server = null;
+    await awaitGuardedVoid(
+      server?.close(force: true),
+      timeout: const Duration(seconds: 2),
+    );
   }
 
   Handler _webSocketHandler() {

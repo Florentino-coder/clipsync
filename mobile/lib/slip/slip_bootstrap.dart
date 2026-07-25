@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../async_guard.dart';
 import '../clip_service.dart';
 import 'local_server.dart';
 import 'outbox.dart';
@@ -118,13 +119,38 @@ class SlipBootstrap {
     _running = false;
     _relayRetryTimer?.cancel();
     _relayRetryTimer = null;
-    await _pipelineSub?.cancel();
+
+    final pipelineSub = _pipelineSub;
     _pipelineSub = null;
-    await _relayWs?.close();
+    await awaitGuardedVoid(
+      pipelineSub?.cancel(),
+      timeout: const Duration(seconds: 2),
+    );
+
+    final relayWs = _relayWs;
     _relayWs = null;
-    await _localServer?.stop();
+    await awaitGuardedVoid(
+      relayWs?.close(),
+      timeout: const Duration(seconds: 2),
+    );
+
+    final localServer = _localServer;
     _localServer = null;
+    await awaitGuardedVoid(
+      localServer?.stop(),
+      timeout: const Duration(seconds: 3),
+    );
+
+    final pipeline = _pipeline;
     _pipeline = null;
+    final ocr = pipeline?.ocr;
+    if (ocr is MlKitSlipOcr) {
+      await awaitGuardedVoid(
+        ocr.close(),
+        timeout: const Duration(seconds: 2),
+      );
+    }
+
     _outbox = null;
     _store = null;
   }
@@ -162,6 +188,13 @@ class SlipBootstrap {
       final ws = await WebSocket.connect(relayUrl).timeout(
         const Duration(seconds: 10),
       );
+      if (!_running) {
+        await awaitGuardedVoid(
+          ws.close(),
+          timeout: const Duration(seconds: 2),
+        );
+        return;
+      }
       _relayWs = ws;
       _relayRetryStep = 0;
       ws.add(jsonEncode({'action': 'subscribe', 'target': targetId}));
