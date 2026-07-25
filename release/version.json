@@ -16,8 +16,8 @@
     "notes": "Fix hang on Slip Capture OFF / Stop Sync: timeout cleanup (WS/EventChannel/server), always clear Please wait, Force Stop if stuck."
   },
   "extension": {
-    "version": "1.0.37",
+    "version": "1.0.38",
     "download_url": "",
-    "notes": "Busy shield: dim/blur Jinbao page with 「ระบบกำลังดำเนินการ」during confirm; auto-dismiss ~75s."
+    "notes": "Pending scrape keeps full account digits + name/account_name for withdraw_notify."
   }
 }

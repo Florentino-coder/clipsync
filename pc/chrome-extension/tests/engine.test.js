@@ -245,6 +245,28 @@ describe('deepFindByText + findRow + findConfirmButton', () => {
     assert.match(first.amount, /1,250\.00/);
     assert.equal(first.order_id, first.ref);
   });
+
+  it('scrapePendingOrders keeps full account digits and name when present', () => {
+    const dom = new JSDOM(`<!DOCTYPE html><body>
+      <table><tbody>
+        <tr><td>WD-7788</td><td>กสิกร</td><td>สมชาย ใจดี</td><td>4774090171</td><td>100.00</td>
+            <td><button>ยืนยัน</button></td></tr>
+      </tbody></table>
+    </body>`);
+    global.document = dom.window.document;
+    const profile = {
+      profile_id: 'jinbao356_v1',
+      row_selector_hints: ['table tbody tr'],
+    };
+    const orders = scrapePendingOrders(profile);
+    assert.ok(orders.length >= 1);
+    const hit = orders.find((o) => String(o.account || '').includes('4774090171'));
+    assert.ok(hit, JSON.stringify(orders));
+    assert.equal(hit.account, '4774090171');
+    assert.equal(hit.account_last4, '0171');
+    const name = String(hit.name || hit.account_name || '');
+    assert.match(name, /สมชาย/);
+  });
 });
 
 describe('apiAdapter', () => {

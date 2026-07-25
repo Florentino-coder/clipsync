@@ -215,7 +215,8 @@
     const selector = rowSelector(profile);
     if (!selector) return [];
 
-    const amountRe = /[\d,]+\.\d{2}/;
+    const amountRe = /[\d,]+\.\d{2}/g;
+    const amountCellRe = /^[\d,]+\.\d{2}$/;
     const accountRe = /\b(\d{9,12})\b/g;
     const bankNeedles = [
       ['KBANK', ['กสิกร', 'kasikorn', 'kbank', 'k+']],
@@ -226,17 +227,86 @@
       ['TTB', ['ทหารไทย', 'ธนชาต', 'ttb']],
       ['BAY', ['กรุงศรี', 'bay', 'krungsri']],
     ];
+    const skipNameExact = new Set([
+      'pending',
+      'confirmed',
+      'approved',
+      'confirm',
+      'approve',
+      'ยืนยัน',
+      'อนุมัติ',
+      'สำเร็จ',
+      'ยืนยันแล้ว',
+      'สำเร็จแล้ว',
+    ]);
+
+    function matchBankCode(text) {
+      const lower = String(text || '').toLowerCase();
+      for (const [code, aliases] of bankNeedles) {
+        if (aliases.some((a) => lower.includes(String(a).toLowerCase()) || text.includes(a))) {
+          return code;
+        }
+      }
+      return '';
+    }
+
+    function isBankAliasCell(text) {
+      return Boolean(matchBankCode(text));
+    }
+
+    function pickNameFromCells(cells) {
+      let best = '';
+      for (const cell of cells) {
+        const t = (cell.textContent || '').trim().replace(/\s+/g, ' ');
+        if (!t || t.length < 3) continue;
+        if (amountCellRe.test(t)) continue;
+        const compact = t.replace(/[\s-]/g, '');
+        if (/^\d+$/.test(compact)) continue;
+        if (isBankAliasCell(t)) continue;
+        if (skipNameExact.has(t.toLowerCase()) || skipNameExact.has(t)) continue;
+        const thaiCount = (t.match(/[\u0E00-\u0E7F]/g) || []).length;
+        const letterCount = (t.match(/[a-zA-Z]/g) || []).length;
+        // Prefer Thai name cells; Latin only when multi-word (e.g. "Alice Bob").
+        if (thaiCount < 3 && !(letterCount >= 3 && /\s/.test(t))) continue;
+        if (t.length > best.length) best = t;
+      }
+      return best;
+    }
+
     const rows = [...document.querySelectorAll(selector)];
     const orders = [];
 
     for (const row of rows) {
       const text = row.textContent || '';
-      const amountMatch = text.match(amountRe);
-      if (!amountMatch) continue;
-
       const cells = [...row.querySelectorAll('td')];
+
+      // Prefer a cell that is exactly an amount so adjacent account digits are not glued on
+      // (JSDOM/textContent often concatenates "4774090171" + "100.00" → "4774090171100.00").
+      let amountStr = '';
+      for (const cell of cells) {
+        const t = (cell.textContent || '').trim();
+        if (amountCellRe.test(t)) {
+          amountStr = t;
+          break;
+        }
+      }
+      if (!amountStr) {
+        amountRe.lastIndex = 0;
+        let bestAmt = '';
+        let mAmt;
+        while ((mAmt = amountRe.exec(text)) !== null) {
+          const candidate = mAmt[0];
+          // Prefer shorter amount-like matches (real amounts), not account+amount concatenations.
+          if (!bestAmt || candidate.replace(/\D/g, '').length < bestAmt.replace(/\D/g, '').length) {
+            bestAmt = candidate;
+          }
+        }
+        if (!bestAmt) continue;
+        amountStr = bestAmt;
+      }
+
       let ref = null;
-      const refCandidates = deepFindByText(row, normalize(text.replace(amountMatch[0], '')));
+      const refCandidates = deepFindByText(row, normalize(text.replace(amountStr, '')));
       for (const hit of refCandidates.length ? refCandidates : [row]) {
         const normalized = normalize(hit.textContent || '');
         if (normalized.length >= 4) {
@@ -246,25 +316,29 @@
       }
       if (!ref && cells.length > 0) ref = (cells[0].textContent || '').trim();
 
-      // Member account: prefer a long digit run that is not the amount.
-      const amountDigits = amountMatch[0].replace(/\D/g, '');
+      // Member account: prefer digit-only cells (full account), never invent digits.
+      const amountDigits = amountStr.replace(/\D/g, '');
       let account = '';
-      let m;
-      accountRe.lastIndex = 0;
-      while ((m = accountRe.exec(text)) !== null) {
-        const digits = m[1];
-        if (digits === amountDigits) continue;
-        if (digits.length >= account.length) account = digits;
-      }
-
-      let bank = '';
-      const lower = text.toLowerCase();
-      for (const [code, aliases] of bankNeedles) {
-        if (aliases.some((a) => lower.includes(String(a).toLowerCase()) || text.includes(a))) {
-          bank = code;
-          break;
+      for (const cell of cells) {
+        const t = (cell.textContent || '').trim();
+        if (amountCellRe.test(t)) continue;
+        const digits = t.replace(/\D/g, '');
+        if (digits.length >= 9 && digits.length <= 12 && digits !== amountDigits) {
+          if (digits.length >= account.length) account = digits;
         }
       }
+      if (!account) {
+        let m;
+        accountRe.lastIndex = 0;
+        while ((m = accountRe.exec(text)) !== null) {
+          const digits = m[1];
+          if (digits === amountDigits) continue;
+          if (digits.length >= account.length) account = digits;
+        }
+      }
+
+      let bank = matchBankCode(text);
+      const name = pickNameFromCells(cells);
 
       const accountLast4 = account ? account.slice(-4) : '';
       let orderId = (ref || '').replace(/\s+/g, ' ').trim();
@@ -272,15 +346,17 @@
       if (!orderId || /^\d{1,3}$/.test(orderId) || orderId.length < 4) {
         orderId = account ? `acct:${account}` : '';
       }
-      if (!orderId && !amountMatch[0]) continue;
+      if (!orderId && !amountStr) continue;
 
       orders.push({
-        ref: orderId || amountMatch[0],
+        ref: orderId || amountStr,
         order_id: orderId || undefined,
-        amount: amountMatch[0],
+        amount: amountStr,
         account: account || undefined,
         account_last4: accountLast4 || undefined,
         bank: bank || undefined,
+        name: name || undefined,
+        account_name: name || undefined,
       });
     }
     return orders;
