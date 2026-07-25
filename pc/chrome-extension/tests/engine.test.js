@@ -1691,6 +1691,17 @@ describe('close-job tail after a successful Jinbao save', () => {
     assert.equal(result.failed_step, 3);
   });
 
+  it('does not accept a pending row whose action button reads อนุมัติ', async () => {
+    buildPage({ rowStatus: 'รอตรวจสอบ', mountSuccess: false });
+    const approveBtn = document.createElement('button');
+    approveBtn.textContent = 'อนุมัติ';
+    document.getElementById('row1').appendChild(approveBtn);
+
+    const result = await run();
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'wait_for_timeout');
+  });
+
   it('still fails when the approved row is ambiguous', async () => {
     buildPage({ rowStatus: 'อนุมัติ', mountSuccess: false, duplicateRow: true });
     const result = await run();

@@ -2422,6 +2422,26 @@
   }
 
   /**
+   * Row text without its action controls — a pending row whose button reads
+   * "อนุมัติ" must not count as an approved row.
+   */
+  function rowStatusText(row) {
+    if (!row) return '';
+    let clone = null;
+    try {
+      clone = row.cloneNode(true);
+      for (const el of clone.querySelectorAll(
+        "button, a[role='button'], [onclick], input[type='submit']"
+      )) {
+        el.remove();
+      }
+    } catch (_) {
+      return row.textContent || '';
+    }
+    return clone.textContent || '';
+  }
+
+  /**
    * The site closed the job but the workflow lost sight of the proof (dialog eaten,
    * list re-rendered). Only treat that as success on hard evidence.
    */
@@ -2435,7 +2455,7 @@
     if (!indicators.length) return null;
     const res = refindContextRow(profile, context, document);
     if (res.status !== 'ok') return null;
-    const text = res.row.textContent || '';
+    const text = rowStatusText(res.row);
     if (!indicators.some((k) => k && text.includes(k))) return null;
     return { ok: true, verified: true, reason: 'already_confirmed', via: 'row_approved' };
   }
