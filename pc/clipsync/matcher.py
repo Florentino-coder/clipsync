@@ -256,8 +256,15 @@ def auto_confirm_block_reason(
         if confidence > 0.0:
             min_conf = float(ac.get("min_ocr_confidence") or 0.0)
             if confidence < min_conf:
-                return "low_ocr_confidence"
-    # Missing / unknown (0.0) confidence: allow when master switch is on.
+                # Soft when amount already parsed. Live SCB slips (1006/1900 on
+                # 2026-07-25) hit low_ocr_confidence with ML Kit Latin averages
+                # in (0, 0.9) even though amount + From last4 were correct and
+                # manual confirm succeeded. Hard gates remain: last4, match,
+                # amount threshold.
+                if not _amount_present(ocr.get("amount")):
+                    return "low_ocr_confidence"
+    # Missing / unknown (0.0) / soft-low-with-amount: allow when master switch on.
+
 
     review = ac.get("require_manual_review") or {}
     if review.get("enabled", False):

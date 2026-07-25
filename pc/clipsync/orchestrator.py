@@ -353,6 +353,9 @@ class SlipOrchestrator:
             "order_id": order.get("order_id") if order else None,
             "decision": decision,
             "confirmed_by": confirmed_by,
+            "ocr_confidence": event.get("ocr_confidence"),
+            "parse_failed": event.get("parse_failed"),
+            "sender_account_last4": event.get("sender_account_last4"),
         }
         if reason:
             record["reason"] = reason

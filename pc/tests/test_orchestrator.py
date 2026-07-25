@@ -627,3 +627,78 @@ async def test_missing_sender_last4_pending_with_reason(tmp_path: Path):
     assert result.get("reason") == "missing_sender_last4"
     bridge.push_confirm_order.assert_not_awaited()
 
+
+@pytest.mark.asyncio
+async def test_live_1900_low_ocr_confidence_still_auto_confirms(tmp_path: Path):
+    """Production 2026-07-25 14:18:42 — amount 1900 From…7476 To…1588.
+
+    Audit: pending_review reason=low_ocr_confidence, then admin_manual succeeded.
+    ocr_confidence float was not audited; any (0, 0.9) reproduces the blocker.
+    """
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+
+    event = {
+        "event_id": "f9d049bc-e1ab-46e3-b3d2-97ec9a27b06b",
+        "amount": 1900.0,
+        "ref_number": None,
+        "sender_account_last4": "7476",
+        "receiver_account_last4": "1588",
+        "ocr_confidence": 0.42,
+        "parse_failed": True,
+        "bank": "SCB",
+    }
+
+    async def _reply() -> None:
+        await asyncio.sleep(0.02)
+        orch.on_confirm_result(
+            {
+                "type": "confirm_result",
+                "orderId": "1900.00",
+                "matchKey": "1900.00",
+                "ok": True,
+                "verified": True,
+                "reason": None,
+            }
+        )
+
+    t = asyncio.create_task(_reply())
+    result = await orch.handle_slip_event(event, source="usb")
+    await t
+
+    bridge.push_confirm_order.assert_awaited_once()
+    assert result["decision"] == "auto_confirmed"
+    audits = _audit_lines(tmp_path / "audit.jsonl")
+    assert audits[-1]["decision"] == "auto_confirmed"
+    assert audits[-1].get("ocr_confidence") == 0.42
+    assert audits[-1].get("sender_account_last4") == "7476"
+
+
+@pytest.mark.asyncio
+async def test_live_1006_empty_from_pending_missing_sender_last4(tmp_path: Path):
+    """Production 2026-07-25 14:17:58 — amount 1006 From '-' must stay pending.
+
+    Must surface missing_sender_last4 (not low_ocr_confidence eating the gate).
+    """
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+
+    event = {
+        "event_id": "5e29a94f-7f74-486b-91df-ccae602fc1f9",
+        "amount": 1006.0,
+        "ref_number": None,
+        "receiver_account_last4": "1588",
+        "ocr_confidence": 0.42,
+        "parse_failed": True,
+        "bank": "SCB",
+    }
+    result = await orch.handle_slip_event(event, source="usb")
+    assert result["decision"] == "pending_review"
+    assert result.get("reason") == "missing_sender_last4"
+    bridge.push_confirm_order.assert_not_awaited()
+    audits = _audit_lines(tmp_path / "audit.jsonl")
+    assert audits[-1].get("reason") == "missing_sender_last4"
+    assert audits[-1].get("ocr_confidence") == 0.42
+

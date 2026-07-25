@@ -5,9 +5,9 @@ API choices:
   is no match, a duplicate ref, or an ambiguous (>1) match. Ambiguous matches
   never auto-confirm because ``should_auto_confirm`` requires a concrete match.
 - ``should_auto_confirm`` returns False when match is None / ambiguous, amount
-  missing with parse_failed, master switch off, confidence too low, or amount
-  needs manual review. Soft parse_failed (null ref) with a usable amount still
-  auto-confirms.
+  missing with parse_failed, master switch off, confidence too low *without* a
+  usable amount, or amount needs manual review. Soft parse_failed (null ref)
+  and low-but-nonzero OCR confidence with a parsed amount still auto-confirm.
 """
 
 from __future__ import annotations
@@ -104,11 +104,12 @@ def test_threshold_disabled_confirms_high_amount():
     assert should_auto_confirm(ocr, matched, cfg) is True
 
 
-def test_low_confidence_blocked():
+def test_low_confidence_soft_when_amount_present():
+    """Low ML Kit averages no longer hard-block when amount already parsed."""
     ocr = {**OCR, "ocr_confidence": 0.5}
     matched = match_order(ocr, ORDERS, CFG, used_refs=set())
     assert matched is not None
-    assert should_auto_confirm(ocr, matched, CFG) is False
+    assert should_auto_confirm(ocr, matched, CFG) is True
 
 
 def test_master_switch_off():
@@ -362,12 +363,83 @@ def test_zero_ocr_confidence_treated_as_unknown_still_auto_confirms():
     assert should_auto_confirm(ocr, matched, CFG) is True
 
 
-def test_low_but_nonzero_ocr_confidence_still_blocks():
-    matched = match_order(OCR, ORDERS, CFG, used_refs=set())
-    ocr = {**OCR, "ocr_confidence": 0.5}
-    assert should_auto_confirm(ocr, matched, CFG) is False
+def test_low_but_nonzero_ocr_confidence_soft_when_amount_parsed():
+    """Live 14:18:42 slip 1900 → รอตรวจ (low_ocr_confidence) despite From…7476.
+
+    Audit.jsonl only stores reason (not the float), so any value in (0, min)
+    reproduces the gate. ML Kit Latin on Thai SCB slips often averages ~0.3–0.8
+    even when amount (+ payer last4) parsed correctly; manual ยืนยันเอง worked.
+    """
     from clipsync.matcher import auto_confirm_block_reason
 
+    matched = match_order(OCR, ORDERS, CFG, used_refs=set())
+    ocr = {
+        **OCR,
+        "sender_account_last4": "7476",
+        "ocr_confidence": 0.5,
+        "parse_failed": True,
+        "ref_number": None,
+    }
+    assert should_auto_confirm(ocr, matched, CFG) is True
+    assert auto_confirm_block_reason(ocr, matched, CFG) is None
+
+
+def test_live_1900_payload_shape_must_auto_confirm():
+    """Exact live shape from activity log 14:18:42 / audit event f9d049bc…"""
+    from clipsync.matcher import auto_confirm_block_reason, resolve_auto_match
+
+    live_1900 = {
+        "event_id": "f9d049bc-e1ab-46e3-b3d2-97ec9a27b06b",
+        "amount": 1900.0,
+        "ref_number": None,
+        "sender_account_last4": "7476",
+        "receiver_account_last4": "1588",
+        # audit omits the float; reason=low_ocr_confidence ⇒ 0 < conf < 0.9
+        "ocr_confidence": 0.42,
+        "parse_failed": True,
+        "bank": "SCB",
+    }
+    matched = resolve_auto_match(live_1900, [], CFG, used_refs=set())
+    assert matched is not None
+    assert matched.get("match_mode") == "amount_only"
+    assert should_auto_confirm(live_1900, matched, CFG) is True
+    assert auto_confirm_block_reason(live_1900, matched, CFG) is None
+
+
+def test_live_1006_matcher_allows_amount_so_orchestrator_can_require_last4():
+    """Live 14:17:58 slip 1006 From '-' — matcher must not eat the last4 gate.
+
+    If confidence hard-blocks first, audit shows low_ocr_confidence forever and
+    never missing_sender_last4. Soft-skip confidence when amount is present.
+    """
+    from clipsync.matcher import auto_confirm_block_reason, resolve_auto_match
+
+    live_1006 = {
+        "event_id": "5e29a94f-7f74-486b-91df-ccae602fc1f9",
+        "amount": 1006.0,
+        "ref_number": None,
+        "receiver_account_last4": "1588",
+        "ocr_confidence": 0.42,
+        "parse_failed": True,
+        "bank": "SCB",
+    }
+    matched = resolve_auto_match(live_1006, [], CFG, used_refs=set())
+    assert matched is not None
+    assert should_auto_confirm(live_1006, matched, CFG) is True
+    assert auto_confirm_block_reason(live_1006, matched, CFG) is None
+
+
+def test_low_ocr_confidence_still_blocks_without_amount():
+    from clipsync.matcher import auto_confirm_block_reason
+
+    matched = {"order_id": "", "amount": None, "match_mode": "amount_only"}
+    ocr = {
+        "amount": None,
+        "ocr_confidence": 0.5,
+        "sender_account_last4": "7476",
+        "parse_failed": False,
+    }
+    assert should_auto_confirm(ocr, matched, CFG) is False
     assert auto_confirm_block_reason(ocr, matched, CFG) == "low_ocr_confidence"
 
 

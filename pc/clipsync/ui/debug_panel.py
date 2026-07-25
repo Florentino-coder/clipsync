@@ -218,6 +218,7 @@ def format_slip_details(event: Mapping[str, Any]) -> str:
         f"Transport: {g('transport', 'source')}",
         f"Ref: {g('ref_number', 'ref')}",
         f"Order: {g('order_id', 'orderId')}",
+        f"OCR confidence: {g('ocr_confidence')}",
         f"Event: {g('event_id')}",
     ]
     return "\n".join(lines)

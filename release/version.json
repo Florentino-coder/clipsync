@@ -3,11 +3,11 @@
   "released_at": "2026-07-25",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.6",
+    "version": "0.9.7",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Do not block auto-confirm on soft parse_failed (null ref); Clipboard shows Auto-confirm เปิด/ปิด; audit reason + payer last4 enrichment."
+    "notes": "OCR confidence is soft when amount parsed (fix low_ocr_confidence blocking SCB auto-confirm); audit now records ocr_confidence/parse_failed/sender_last4."
   },
   "android": {
     "version": "0.9.4+25",
