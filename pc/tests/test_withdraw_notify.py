@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from clipsync.orchestrator import _normalize_order
+from unittest.mock import MagicMock
+
+from clipsync.orchestrator import SlipOrchestrator, _normalize_order
+from clipsync.withdraw_notify import (
+    build_withdraw_notify_payload,
+    format_amount_display,
+    new_orders_since,
+)
 
 
 def test_normalize_order_keeps_full_account_and_name():
@@ -45,3 +52,73 @@ def test_normalize_order_empty_name_ok_when_missing():
     )
     assert out["account_name"] == ""
     assert out["account"] == "9999888877"
+
+
+def test_format_amount_display():
+    assert format_amount_display("100.00") == "100.00"
+    assert format_amount_display(100) == "100.00"
+    assert format_amount_display("1,464.50") == "1464.50"
+
+
+def test_new_orders_since_returns_only_unseen_ids():
+    prev = [{"order_id": "A", "amount": 1, "account": "1", "bank": "KBANK", "account_name": ""}]
+    curr = [
+        {"order_id": "A", "amount": 1, "account": "1", "bank": "KBANK", "account_name": ""},
+        {"order_id": "B", "amount": 2, "account": "22", "bank": "SCB", "account_name": "Bob"},
+    ]
+    added = new_orders_since(prev, curr)
+    assert [o["order_id"] for o in added] == ["B"]
+
+
+def test_build_withdraw_notify_payload_fields():
+    order = {
+        "order_id": "W-1",
+        "amount": 100,
+        "account": "4774090171",
+        "bank": "KBANK",
+        "account_name": "A",
+    }
+    payload = build_withdraw_notify_payload(order, ts=1720000000)
+    assert payload == {
+        "action": "withdraw_notify",
+        "order_id": "W-1",
+        "amount": "100.00",
+        "account": "4774090171",
+        "bank": "KBANK",
+        "account_name": "A",
+        "ts": 1720000000,
+    }
+
+
+def test_on_pending_orders_emits_only_new(monkeypatch):
+    sent: list[dict] = []
+
+    def fake_emit(payload: dict) -> None:
+        sent.append(payload)
+
+    orch = SlipOrchestrator(
+        {
+            "auto_confirm": {"enabled": True, "min_ocr_confidence": 0.9,
+                             "require_manual_review": {"enabled": False, "amount_threshold": 99999}},
+            "matching": {"require_account_last4_match": True, "prevent_duplicate_ref_number": True},
+        },
+        chrome_bridge=MagicMock(),
+        shared_secret="x" * 32,
+        send_withdraw_notify=fake_emit,
+    )
+    # order_id must be >=4 chars (is_reliable_order_id); plan's "A"/"B" are rejected.
+    orch.on_pending_orders(
+        {"orders": [{"order_id": "ORD-A", "amount": 10, "account": "1111222233", "bank": "KBANK"}]}
+    )
+    orch.on_pending_orders(
+        {
+            "orders": [
+                {"order_id": "ORD-A", "amount": 10, "account": "1111222233", "bank": "KBANK"},
+                {"order_id": "ORD-B", "amount": 20, "account": "4444555566", "bank": "SCB", "name": "B"},
+            ]
+        }
+    )
+    assert len(sent) == 2  # first snapshot all new + second only ORD-B
+    assert sent[0]["order_id"] == "ORD-A"
+    assert sent[1]["order_id"] == "ORD-B"
+    assert sent[1]["account"] == "4444555566"

@@ -21,12 +21,14 @@ from clipsync.matcher import (
 )
 from clipsync.seen_events import SeenEvents, default_seen_events_path
 from clipsync.slip_ocr import resolve_sender_account_last4
+from clipsync.withdraw_notify import build_withdraw_notify_payload, new_orders_since
 
 logger = logging.getLogger(__name__)
 
 CONFIRM_TIMEOUT_DEFAULT = 60.0
 
 SendAckCallback = Callable[[str], Awaitable[None] | None]
+SendWithdrawNotifyCallback = Callable[[dict[str, Any]], None]
 
 
 def default_used_refs_path() -> Path:
@@ -120,6 +122,7 @@ class SlipOrchestrator:
         used_refs_path: Optional[Path | str] = None,
         confirm_timeout: float = CONFIRM_TIMEOUT_DEFAULT,
         send_ack: Optional[SendAckCallback] = None,
+        send_withdraw_notify: Optional[SendWithdrawNotifyCallback] = None,
         seen_events: Optional[SeenEvents] = None,
     ) -> None:
         self._cfg: MutableMapping[str, Any] = dict(cfg)
@@ -131,6 +134,7 @@ class SlipOrchestrator:
         )
         self._confirm_timeout = float(confirm_timeout)
         self._send_ack = send_ack
+        self._send_withdraw_notify = send_withdraw_notify
 
         if seen_events is not None:
             self._seen = seen_events
@@ -153,6 +157,12 @@ class SlipOrchestrator:
         """Attach/replace the phone ack callback (USB or relay transport)."""
         self._send_ack = send_ack
 
+    def set_send_withdraw_notify(
+        self, send_withdraw_notify: Optional[SendWithdrawNotifyCallback]
+    ) -> None:
+        """Attach/replace the withdraw_notify emit callback."""
+        self._send_withdraw_notify = send_withdraw_notify
+
     def on_pending_orders(self, data: Mapping[str, Any] | None) -> None:
         """Chrome-bridge callback — must never raise (keeps WS alive)."""
         try:
@@ -161,11 +171,36 @@ class SlipOrchestrator:
             orders = data.get("orders") or []
             if not isinstance(orders, list):
                 return
-            self._pending_orders = [
+            normalized = [
                 _normalize_order(o) for o in orders if isinstance(o, Mapping)
             ]
+            newly = new_orders_since(self._pending_orders, normalized)
+            self._pending_orders = normalized
+            self._emit_withdraw_notifies(newly)
         except Exception:
             logger.exception("on_pending_orders failed")
+
+    def _emit_withdraw_notifies(self, orders: list[dict[str, Any]]) -> None:
+        send = self._send_withdraw_notify
+        if send is None:
+            return
+        for order in orders:
+            order_id = str(order.get("order_id") or "").strip()
+            account = str(order.get("account") or "").strip()
+            if not order_id or not account:
+                logger.info(
+                    "skip withdraw_notify: empty order_id or account (id=%r account=%r)",
+                    order_id,
+                    account,
+                )
+                continue
+            try:
+                payload = build_withdraw_notify_payload(order)
+                send(payload)
+            except Exception:
+                logger.exception(
+                    "send_withdraw_notify failed for order_id=%s", order_id
+                )
 
     def on_confirm_result(self, data: Mapping[str, Any] | None) -> None:
         """Chrome-bridge callback — must never raise (keeps WS alive)."""

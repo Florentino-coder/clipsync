@@ -105,6 +105,7 @@ class SlipBootstrap:
             cfg,
             chrome_bridge=self._bridge,
             shared_secret=self._shared_secret,
+            send_withdraw_notify=self._emit_withdraw_notify,
         )
 
         self._manager = TransportManager(
@@ -199,6 +200,21 @@ class SlipBootstrap:
     def _on_pending_orders(self, data: dict[str, Any]) -> None:
         if self._orchestrator is not None:
             self._orchestrator.on_pending_orders(data)
+
+    def _emit_withdraw_notify(self, payload: dict[str, Any]) -> None:
+        """Schedule withdraw_notify on the ClipSyncClient WS loop (bridge thread-safe)."""
+        schedule = getattr(self._client, "schedule_withdraw_notify", None)
+        if callable(schedule):
+            schedule(payload)
+            return
+        send = getattr(self._client, "send_withdraw_notify", None)
+        if send is None:
+            return
+        loop = getattr(self._client, "loop", None)
+        if loop is not None and loop.is_running():
+            result = send(payload)
+            if asyncio.iscoroutine(result):
+                asyncio.run_coroutine_threadsafe(result, loop)
 
     def _on_confirm_result(self, data: dict[str, Any]) -> None:
         reason = data.get("reason")
