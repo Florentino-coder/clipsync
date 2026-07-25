@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Optional
 from clipsync.audit import append_audit
 from clipsync.config import user_data_dir
 from clipsync.matcher import (
+    is_reliable_order_id,
     load_used_refs,
     resolve_auto_match,
     save_used_refs,
@@ -63,6 +64,9 @@ def _normalize_order(order: Mapping[str, Any]) -> dict[str, Any]:
     # DOM scrape uses ``ref`` as the row key when no explicit order_id exists.
     if order_id is None or str(order_id).strip() == "":
         order_id = order.get("ref")
+    order_id_s = str(order_id).strip() if order_id is not None else ""
+    if not is_reliable_order_id(order_id_s):
+        order_id_s = ""
     last4 = order.get("account_last4")
     if last4 is None:
         last4 = order.get("accountLast4")
@@ -77,7 +81,7 @@ def _normalize_order(order: Mapping[str, Any]) -> dict[str, Any]:
     if bank is None:
         bank = order.get("bank_name") or order.get("bank_name_th") or order.get("member_bank")
     return {
-        "order_id": str(order_id).strip() if order_id is not None else "",
+        "order_id": order_id_s,
         "amount": order.get("amount"),
         "account_last4": str(last4) if last4 else "",
         "bank": str(bank).strip() if bank is not None and str(bank).strip() else "",
@@ -217,7 +221,31 @@ class SlipOrchestrator:
             return result
 
         assert matched is not None
+        # Close-job account select needs payer last4; without it extension returns
+        # missing_select_value — keep in review instead of a guaranteed fail.
+        sender_last4 = str(event.get("sender_account_last4") or "").strip()
+        if not sender_last4:
+            masked = event.get("sender_account_masked") or event.get("senderAccountMasked")
+            if masked:
+                digits = "".join(ch for ch in str(masked) if ch.isdigit())
+                if len(digits) >= 4:
+                    sender_last4 = digits[-4:]
+        if not sender_last4 and event.get("senderAccountLast4"):
+            sender_last4 = str(event.get("senderAccountLast4")).strip()
+        if len("".join(ch for ch in sender_last4 if ch.isdigit())) < 4:
+            logger.info(
+                "auto-confirm skipped: missing sender_account_last4 event_id=%s",
+                event_id,
+            )
+            result = self._audit_and_return(
+                event, matched, "pending_review", confirmed_by=None
+            )
+            await self._emit_ack(event_id)
+            return result
+
         order_id = str(matched.get("order_id") or "").strip()
+        if not is_reliable_order_id(order_id):
+            order_id = ""
         # Extension finds the Jinbao row by orderId OR amount OR ref; amount+slip
         # are required for same-amount disambiguation (same path as manual confirm).
         amount = event.get("amount")
@@ -227,7 +255,7 @@ class SlipOrchestrator:
                 amount_key = f"{float(str(amount).replace(',', '')):.2f}"
         except (TypeError, ValueError):
             amount_key = ""
-        # Prefer a non-empty id for confirm_result correlation; fall back to amount.
+        # Prefer amount when scrape id is garbage ("1"); keep reliable ids when present.
         push_id = order_id or amount_key
         if not push_id:
             result = self._audit_and_return(

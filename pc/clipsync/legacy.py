@@ -45,7 +45,7 @@ from clipsync.ui.debug_panel import DebugPanel
 from clipsync.ui.settings_panel import SettingsPanel
 
 APP_NAME = "ClipSync PC"
-APP_VERSION = "0.9.3"
+APP_VERSION = "0.9.4"
 AUTHOR_NAME = "Florentino356"
 DEFAULT_RELAY_URL = "wss://clipsync-relay.onrender.com"
 UPDATE_MANIFEST_URL = (
@@ -856,7 +856,12 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
         )
 
     def _on_slip_manual_confirm(self, event: Mapping[str, Any]) -> None:
-        order_id = event.get("order_id") or event.get("orderId")
+        from clipsync.matcher import is_reliable_order_id
+
+        raw_order_id = event.get("order_id") or event.get("orderId")
+        order_id = str(raw_order_id).strip() if raw_order_id is not None else ""
+        if not is_reliable_order_id(order_id):
+            order_id = ""
         amount = event.get("amount")
         try:
             if amount is not None and str(amount).strip() != "":
@@ -897,6 +902,10 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
             slip_payload["receiver_bank"] = event.get("receiverBank")
         if "sender_name" not in slip_payload and event.get("senderName"):
             slip_payload["sender_name"] = event.get("senderName")
+        if "sender_account_last4" not in slip_payload and event.get("senderAccountLast4"):
+            slip_payload["sender_account_last4"] = event.get("senderAccountLast4")
+        if "sender_account_masked" not in slip_payload and event.get("senderAccountMasked"):
+            slip_payload["sender_account_masked"] = event.get("senderAccountMasked")
         # The close-job form needs the payer ("จาก") last4. If the event carries
         # the masked template (e.g. "xxxxxx7476") but no explicit last4, derive
         # it from the trailing digits — no OCR needed.
@@ -911,9 +920,7 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
                     self._append_log(
                         f"Slip: payer last4 derived from mask = {digits[-4:]}"
                     )
-        # The external slip app forwards only the receiver account; the close-job
-        # form needs the payer ("จาก") account. Recover it by OCR'ing the slip
-        # image locally so we can auto-pick the correct rotating shop account.
+        # Optional Tesseract last resort — never required for a successful push.
         if not slip_payload.get("sender_account_last4"):
             thumb = event.get("thumbnail_jpeg_b64")
             if isinstance(thumb, str) and thumb:
@@ -933,12 +940,27 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
                         )
                 except Exception as exc:  # pragma: no cover - defensive
                     self._append_log(f"Slip OCR failed: {exc}")
-        match_key = order_id or ref_number or amount
+
+        if not slip_payload.get("sender_account_last4"):
+            self._append_log(
+                "Manual confirm blocked: missing payer (จาก) account last4 on slip"
+            )
+            if messagebox is not None:
+                messagebox.showwarning(
+                    "ยืนยันเอง",
+                    "สลิปนี้ไม่มีเลขบัญชีผู้โอน (จาก) — เลือกบัญชีร้านบนฟอร์มไม่ได้\n"
+                    "ส่งสลิปใหม่จากมือถือ หรือเลือกรายการที่มี From ครบ",
+                )
+            return
+
+        # Prefer amount over unreliable scrape ids like "1".
+        push_id = order_id or (amount or "")
+        match_key = push_id or ref_number or amount
         record = {
             "event_id": event.get("event_id"),
             "ref_number": ref_number,
             "amount": amount,
-            "order_id": order_id,
+            "order_id": order_id or None,
             "decision": "confirm_sent",
             "confirmed_by": "admin_manual",
         }
@@ -965,7 +987,7 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
         try:
             n_clients = bridge.schedule(
                 bridge.push_confirm_order(
-                    "" if order_id is None else str(order_id),
+                    str(push_id),
                     amount=amount,
                     ref_number=ref_number,
                     slip=slip_payload or None,
@@ -1003,7 +1025,7 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
             "decision": "กำลังยืนยัน",
             "confirm_hint": "confirm_sent",
             "confirmed_by": "admin_manual",
-            "order_id": order_id,
+            "order_id": order_id or push_id,
         }
         self.push_slip_ui_event(ui_event)
         self._append_log(

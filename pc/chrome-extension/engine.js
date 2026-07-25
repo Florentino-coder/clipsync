@@ -267,12 +267,16 @@
       }
 
       const accountLast4 = account ? account.slice(-4) : '';
-      const orderId = (ref || '').replace(/\s+/g, ' ').trim() || (account ? `acct:${account}` : '');
+      let orderId = (ref || '').replace(/\s+/g, ' ').trim();
+      // Reject page indices / short tokens like "1" — PC must match by amount instead.
+      if (!orderId || /^\d{1,3}$/.test(orderId) || orderId.length < 4) {
+        orderId = account ? `acct:${account}` : '';
+      }
       if (!orderId && !amountMatch[0]) continue;
 
       orders.push({
-        ref: orderId,
-        order_id: orderId,
+        ref: orderId || amountMatch[0],
+        order_id: orderId || undefined,
         amount: amountMatch[0],
         account: account || undefined,
         account_last4: accountLast4 || undefined,

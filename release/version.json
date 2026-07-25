@@ -3,11 +3,11 @@
   "released_at": "2026-07-24",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.3",
+    "version": "0.9.4",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Auto-confirm amount-only fallback when pending_orders scrape is empty."
+    "notes": "Reject scrape order_id like '1'; require payer last4 before confirm push."
   },
   "android": {
     "version": "0.9.3+24",
@@ -16,8 +16,8 @@
     "notes": "SCB masked-sender OCR fix — applicationId com.clipsync.mobile_build.test"
   },
   "extension": {
-    "version": "1.0.35",
+    "version": "1.0.36",
     "download_url": "",
-    "notes": "Don't fail step13 after success Swal already dismissed; row อนุมัติ fallback. Reload unpacked."
+    "notes": "Scrape skips tiny order ids like '1'; match by amount+account instead."
   }
 }

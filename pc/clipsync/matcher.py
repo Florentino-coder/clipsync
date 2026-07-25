@@ -8,6 +8,24 @@ from typing import Any, Iterable, Mapping, MutableSet, Optional, Set
 
 AMOUNT_EPSILON = 0.005
 
+
+def is_reliable_order_id(value: Any) -> bool:
+    """True when a scraped/matched id is safe to use as the Jinbao row match key.
+
+    DOM scrapes often grab page indices / tab numbers like ``\"1\"`` which then
+    become ``Admin confirm sent (1)`` and break account select. Prefer amount.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if len(text) < 4:
+        return False
+    # Pure short integers (1, 12, 99) are almost never real order ids.
+    if text.isdigit() and len(text) <= 3:
+        return False
+    return True
+
+
 # Member/payee bank aliases — order row bank vs slip receiver bank.
 _BANK_ALIASES: dict[str, tuple[str, ...]] = {
     "SCB": ("SCB", "ไทยพาณิชย์", "ธนาคารไทยพาณิชย์", "SIAM COMMERCIAL"),

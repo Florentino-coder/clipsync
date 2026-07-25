@@ -34,6 +34,7 @@ EVENT = {
     "event_id": "evt-001",
     "amount": 350.0,
     "receiver_account_last4": "6789",
+    "sender_account_last4": "1234",
     "ref_number": "202607221432001",
     "ocr_confidence": 0.97,
     "parse_failed": False,

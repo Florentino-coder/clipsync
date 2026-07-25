@@ -361,3 +361,14 @@ def test_resolve_auto_match_ambiguous_same_amount_stays_none():
         {"order_id": "b", "amount": 350.0},
     ]
     assert resolve_auto_match(OCR, orders, CFG, used_refs=set()) is None
+
+
+def test_is_reliable_order_id_rejects_page_index():
+    from clipsync.matcher import is_reliable_order_id
+
+    assert is_reliable_order_id("1") is False
+    assert is_reliable_order_id("12") is False
+    assert is_reliable_order_id("099") is False
+    assert is_reliable_order_id("0971572720") is True
+    assert is_reliable_order_id("acct:0722488474") is True
+    assert is_reliable_order_id("") is False
