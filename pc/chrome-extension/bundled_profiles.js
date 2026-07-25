@@ -7,6 +7,24 @@ globalThis.BUNDLED_SITE_PROFILES = [
       "https://manage.jinbao356.com/*"
     ],
     "order_page_url_hint": "/withdraw/transaction",
+    "withdraw_notify_tab_hints": [
+      "รายการที่อนุมัติแล้ว",
+      "อนุมัติแล้ว",
+      "approved"
+    ],
+    "withdraw_notify_pending_tab_hints": [
+      "รายการรออนุมัติ",
+      "รออนุมัติ",
+      "pending"
+    ],
+    "withdraw_notify_status_include": [
+      "อนุมัติแล้ว",
+      "approved"
+    ],
+    "withdraw_notify_status_exclude": [
+      "รออนุมัติ",
+      "pending"
+    ],
     "row_selector_hints": [
       "tr.el-table__row",
       ".el-table__body tr",
@@ -177,7 +195,8 @@ globalThis.BUNDLED_SITE_PROFILES = [
       }
     ],
     "_notes": [
-      "Target page: https://manage.jinbao356.com/withdraw/transaction",
+      "Target page for withdraw_notify: https://manage.jinbao356.com/withdraw/transaction — leave tab 「รายการที่อนุมัติแล้ว」 open (money ready to transfer).",
+      "Do NOT use 「รายการรออนุมัติ」 for withdraw_notify — that tab is gameplay/log review only.",
       "Close-job form is below the fold in the withdrawal modal — scroll_into_view first.",
       "After บันทึก, Jinbao shows BootstrapVue confirm (ยืนยันการถอนรายการ) — click ตกลง, then SweetAlert2 success — click ตกลง again.",
       "One dismiss_dialog closes ONE popup: the success SweetAlert2 that mounts from the confirm click is left for the wait_for/verify_result steps, which also pass on satisfied_by success_observed when it is already gone.",

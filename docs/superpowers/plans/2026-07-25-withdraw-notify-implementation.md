@@ -4,7 +4,9 @@
 
 **Goal:** Ship Phase A complete (typed `withdraw_notify` → all online phones → local notify + copy amount/full account + inbox + bank logos), then wire Phase B `slip_status` with Safety S1–S3 (hide copy after slip, remove on success, loud fail / no silent re-queue).
 
-**Architecture:** Jinbao scrape → Chrome extension `pending_orders` → PC `_normalize_order` (keep full `account` + `account_name` + `order_id`) → PC emits typed relay action → relay fans out to every subscribed phone for that PC → Flutter queue + `flutter_local_notifications` + in-app inbox. After slip: PC orchestrator stage changes → typed `slip_status` → phone updates slip notify **and** withdraw-queue copy/safety state. Do **not** stuff JSON into `clip`. No FCM, no bubble.
+**Architecture:** Jinbao tab **「รายการที่อนุมัติแล้ว」** (approved / ready to transfer) → Chrome extension `pending_orders` scrape (exclude 「รายการรออนุมัติ」) → PC `_normalize_order` (keep full `account` + `account_name` + `order_id`) → PC emits typed relay action → relay fans out to every subscribed phone for that PC → Flutter queue + `flutter_local_notifications` + in-app inbox. After slip: PC orchestrator stage changes → typed `slip_status` → phone updates slip notify **and** withdraw-queue copy/safety state. Do **not** stuff JSON into `clip`. No FCM, no bubble.
+
+**Product correction (2026-07-25):** notify = approved withdrawals ready to pay out — **not** pending-approval / gameplay-review tab.
 
 **Tech Stack:** aiohttp relay (`server/relay_server.py`), PC Python (`pc/clipsync/orchestrator.py`, `legacy.py` ClipSyncClient), Chrome extension (`engine.js` scrape), Flutter + `flutter_local_notifications` + existing FGS WebSocket (`mobile/lib/clip_service.dart`), pytest / flutter_test.
 
@@ -31,7 +33,7 @@
 | `pc/clipsync/bootstrap.py` | Wire emit callbacks from pending_orders + orchestrator decisions → client send |
 | `pc/tests/test_withdraw_notify.py` | Normalize + diff + payload unit tests |
 | `pc/tests/test_orchestrator.py` | Extend for normalize fields + slip_status emit hooks |
-| `pc/chrome-extension/engine.js` | Ensure DOM scrape keeps full `account` + optional `name`/`account_name` |
+| `pc/chrome-extension/engine.js` | DOM scrape for **approved** withdraw rows (exclude รออนุมัติ); keep full `account` + name |
 | `pc/chrome-extension/tests/engine.test.js` | Scrape field assertions |
 | `pc/chrome-extension/manifest.json` | Bump when extension scrape changes |
 | `mobile/lib/withdraw/withdraw_order.dart` | Immutable order model + parse from relay JSON |

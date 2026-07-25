@@ -208,6 +208,73 @@
     return { canary_ok: canaryOk, logged_in: loggedIn };
   }
 
+  /**
+   * Withdraw notify targets 「รายการที่อนุมัติแล้ว」 (approved / ready to transfer).
+   * 「รายการรออนุมัติ」 is gameplay review — must NOT emit withdraw_notify.
+   * Returns: true = approved tab, false = pending tab, null = unknown.
+   */
+  function detectWithdrawNotifyTab(profile, doc) {
+    const document = getDocument(doc);
+    if (!document) return null;
+    const approvedHints = profile.withdraw_notify_tab_hints || [
+      'รายการที่อนุมัติแล้ว',
+      'อนุมัติแล้ว',
+      'approved',
+    ];
+    const pendingHints = profile.withdraw_notify_pending_tab_hints || [
+      'รายการรออนุมัติ',
+      'รออนุมัติ',
+      'pending',
+    ];
+    const activeSelectors = [
+      '.el-tabs__item.is-active',
+      '.nav-tabs .active',
+      '.nav-link.active',
+      '[role="tab"][aria-selected="true"]',
+      '.tabs .active',
+      'button[aria-selected="true"]',
+    ];
+    let activeText = '';
+    for (const sel of activeSelectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el) {
+          activeText = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          if (activeText) break;
+        }
+      } catch (_) {
+        /* invalid selector */
+      }
+    }
+    if (activeText) {
+      if (pendingHints.some((h) => activeText.includes(h))) return false;
+      if (approvedHints.some((h) => activeText.includes(h))) return true;
+    }
+    try {
+      const href = String((document.defaultView && document.defaultView.location && document.defaultView.location.href) || '');
+      const tabHint = String(profile.withdraw_notify_tab_query || '').trim();
+      if (tabHint && href.includes(tabHint)) return true;
+      const pendingQuery = String(profile.withdraw_notify_pending_tab_query || '').trim();
+      if (pendingQuery && href.includes(pendingQuery)) return false;
+    } catch (_) {
+      /* ignore */
+    }
+    return null;
+  }
+
+  function rowAllowsWithdrawNotify(rowText, profile, tabKind) {
+    const text = String(rowText || '');
+    const exclude = profile.withdraw_notify_status_exclude || ['รออนุมัติ', 'pending'];
+    if (exclude.some((x) => text.includes(x))) return false;
+    const include = profile.withdraw_notify_status_include || ['อนุมัติแล้ว', 'approved'];
+    if (include.some((x) => text.toLowerCase().includes(String(x).toLowerCase()))) return true;
+    // On the approved tab, rows without an explicit status cell still notify.
+    if (tabKind === true) return true;
+    // Unknown tab: only include when status clearly matches include list (above).
+    // Pending tab: never.
+    return false;
+  }
+
   function scrapePendingOrders(profile, doc) {
     const document = getDocument(doc);
     if (!document) return [];
@@ -215,9 +282,27 @@
     const selector = rowSelector(profile);
     if (!selector) return [];
 
-    const amountRe = /[\d,]+\.\d{2}/g;
+    const tabKind = detectWithdrawNotifyTab(profile, document);
+    // Pending-approval tab is never a withdraw-notify source.
+    if (tabKind === false) return [];
+
+    // Jinbao often shows whole baht as "1000" / "1,000" (no .00). Require
+    // decimals OR 1–8 digit whole amounts so 9–12 digit accounts are not amounts.
+    const amountRe = /[\d,]+\.\d{2}|\b\d{1,3}(?:,\d{3})+\b|\b\d{1,8}\b/g;
     const amountCellRe = /^[\d,]+\.\d{2}$/;
+    const amountWholeCellRe = /^(?:\d{1,3}(?:,\d{3})+|\d{1,8})$/;
     const accountRe = /\b(\d{9,12})\b/g;
+
+    function cellAmountText(raw) {
+      const t = String(raw || '')
+        .replace(/[฿$]/g, '')
+        .replace(/บาท/g, '')
+        .trim()
+        .replace(/\s+/g, '');
+      if (!t) return '';
+      if (amountCellRe.test(t) || amountWholeCellRe.test(t)) return t;
+      return '';
+    }
     const bankNeedles = [
       ['KBANK', ['กสิกร', 'kasikorn', 'kbank', 'k+']],
       ['SCB', ['ไทยพาณิชย์', 'scb', 'siam commercial']],
@@ -235,9 +320,22 @@
       'approve',
       'ยืนยัน',
       'อนุมัติ',
+      'อนุมัติแล้ว',
+      'รออนุมัติ',
       'สำเร็จ',
       'ยืนยันแล้ว',
       'สำเร็จแล้ว',
+    ]);
+    const skipOrderIdExact = new Set([
+      ...skipNameExact,
+      'รอทำรายการ',
+      'processing',
+      'rejected',
+      'reject',
+      'ยกเลิก',
+      'cancel',
+      'cancelled',
+      'canceled',
     ]);
 
     function matchBankCode(text) {
@@ -259,7 +357,7 @@
       for (const cell of cells) {
         const t = (cell.textContent || '').trim().replace(/\s+/g, ' ');
         if (!t || t.length < 3) continue;
-        if (amountCellRe.test(t)) continue;
+        if (cellAmountText(t)) continue;
         const compact = t.replace(/[\s-]/g, '');
         if (/^\d+$/.test(compact)) continue;
         if (isBankAliasCell(t)) continue;
@@ -279,14 +377,15 @@
     for (const row of rows) {
       const text = row.textContent || '';
       const cells = [...row.querySelectorAll('td')];
+      if (!rowAllowsWithdrawNotify(text, profile, tabKind)) continue;
 
       // Prefer a cell that is exactly an amount so adjacent account digits are not glued on
       // (JSDOM/textContent often concatenates "4774090171" + "100.00" → "4774090171100.00").
       let amountStr = '';
       for (const cell of cells) {
-        const t = (cell.textContent || '').trim();
-        if (amountCellRe.test(t)) {
-          amountStr = t;
+        const hit = cellAmountText(cell.textContent || '');
+        if (hit) {
+          amountStr = hit;
           break;
         }
       }
@@ -296,8 +395,11 @@
         let mAmt;
         while ((mAmt = amountRe.exec(text)) !== null) {
           const candidate = mAmt[0];
+          const digits = candidate.replace(/\D/g, '');
+          // Skip account-length digit runs picked up from loose whole-amount regex.
+          if (!candidate.includes('.') && digits.length >= 9) continue;
           // Prefer shorter amount-like matches (real amounts), not account+amount concatenations.
-          if (!bestAmt || candidate.replace(/\D/g, '').length < bestAmt.replace(/\D/g, '').length) {
+          if (!bestAmt || digits.length < bestAmt.replace(/\D/g, '').length) {
             bestAmt = candidate;
           }
         }
@@ -317,23 +419,41 @@
       if (!ref && cells.length > 0) ref = (cells[0].textContent || '').trim();
 
       // Member account: prefer digit-only cells (full account), never invent digits.
+      // Skip Thai mobiles (08x/06x/09x) when a non-mobile account candidate exists.
       const amountDigits = amountStr.replace(/\D/g, '');
       let account = '';
+      let accountIsMobile = false;
+      function isThaiMobile(digits) {
+        return digits.length === 10 && /^0[689]/.test(digits);
+      }
+      function considerAccount(digits) {
+        if (digits.length < 9 || digits.length > 12 || digits === amountDigits) return;
+        const mobile = isThaiMobile(digits);
+        if (!account) {
+          account = digits;
+          accountIsMobile = mobile;
+          return;
+        }
+        if (digits.length > account.length) {
+          account = digits;
+          accountIsMobile = mobile;
+          return;
+        }
+        if (digits.length === account.length && accountIsMobile && !mobile) {
+          account = digits;
+          accountIsMobile = false;
+        }
+      }
       for (const cell of cells) {
         const t = (cell.textContent || '').trim();
-        if (amountCellRe.test(t)) continue;
-        const digits = t.replace(/\D/g, '');
-        if (digits.length >= 9 && digits.length <= 12 && digits !== amountDigits) {
-          if (digits.length >= account.length) account = digits;
-        }
+        if (cellAmountText(t)) continue;
+        considerAccount(t.replace(/\D/g, ''));
       }
       if (!account) {
         let m;
         accountRe.lastIndex = 0;
         while ((m = accountRe.exec(text)) !== null) {
-          const digits = m[1];
-          if (digits === amountDigits) continue;
-          if (digits.length >= account.length) account = digits;
+          considerAccount(m[1]);
         }
       }
 
@@ -342,8 +462,15 @@
 
       const accountLast4 = account ? account.slice(-4) : '';
       let orderId = (ref || '').replace(/\s+/g, ' ').trim();
-      // Reject page indices / short tokens like "1" — PC must match by amount instead.
-      if (!orderId || /^\d{1,3}$/.test(orderId) || orderId.length < 4) {
+      // Reject page indices / status labels / short tokens — prefer acct:<digits>.
+      const orderIdKey = orderId.toLowerCase();
+      if (
+        !orderId ||
+        /^\d{1,3}$/.test(orderId) ||
+        orderId.length < 4 ||
+        skipOrderIdExact.has(orderId) ||
+        skipOrderIdExact.has(orderIdKey)
+      ) {
         orderId = account ? `acct:${account}` : '';
       }
       if (!orderId && !amountStr) continue;
@@ -2779,6 +2906,8 @@
     isLoggedOut,
     checkCanary,
     scrapePendingOrders,
+    detectWithdrawNotifyTab,
+    rowAllowsWithdrawNotify,
     outlineButton,
     clickableTarget,
     dispatchClick,

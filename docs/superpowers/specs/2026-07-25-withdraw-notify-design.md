@@ -31,8 +31,8 @@
 ## 3. Architecture
 
 ```
-Jinbao (back office)
-  → Chrome extension: pending_orders (existing scrape)
+Jinbao (back office) — tab 「รายการที่อนุมัติแล้ว」 only
+  → Chrome extension: pending_orders scrape (wire name kept; semantics = approved / ready-to-transfer)
   → ClipSync PC: normalize order — MUST keep full account digits + account name + order_id
   → Relay: action = withdraw_notify
   → All online phones paired to that PC
@@ -42,6 +42,15 @@ After staff transfers (unchanged slip path):
   Phone slip → PC match / confirm → (Phase B) slip_status via relay
   → Update queue / notifications (Safety S1–S3)
 ```
+
+**Tab semantics (product, 2026-07-25 correction):**
+
+| Jinbao tab | Purpose | withdraw_notify? |
+|---|---|---|
+| **รายการที่อนุมัติแล้ว** | Money ready to transfer out | **Yes** — scrape + emit |
+| **รายการรออนุมัติ** | Review player gameplay / logs | **No** — never emit |
+
+Wire message type remains `pending_orders` for compatibility; PC activity log says `Withdraw scrape`.
 
 ### Recipients
 
@@ -227,7 +236,8 @@ Mobile dependency: add `flutter_local_notifications` (or equivalent). FGS + WS a
 
 ### Phase A (first ship)
 
-1. New Jinbao pending order → all online paired phones get heads-up while WS up.  
+1. New Jinbao **approved** withdraw (tab 「รายการที่อนุมัติแล้ว」) → all online paired phones get heads-up while WS up.  
+   Pending-approval tab 「รายการรออนุมัติ」 must **not** trigger notify.  
 2. Shade shows detail + copy amount / copy full account; clipboard matches active order.  
 3. 10+/min simulated → summary/throttle; no unbounded notification spam; copy still targets active.  
 4. App inbox lists pending orders; logos on notification + inbox; unknown bank → generic.  
@@ -246,7 +256,8 @@ Mobile dependency: add `flutter_local_notifications` (or equivalent). FGS + WS a
 ## 13. Thai summary (review gate)
 
 - ใช้ relay แบบ typed `withdraw_notify` (ไม่ยัด `clip` / ไม่ poll HTTP)  
-- เส้นทาง: Jinbao → ext → PC (บัญชีเต็ม+ชื่อ+order_id) → relay → **ทุกมือถือ online** → คิว + local notify  
+- เส้นทาง: Jinbao **แท็บรายการที่อนุมัติแล้ว** → ext → PC (บัญชีเต็ม+ชื่อ+order_id) → relay → **ทุกมือถือ online** → คิว + local notify  
+- **ห้าม** ใช้แท็บรายการรออนุมัติ สำหรับ notify (แท็บนั้นไว้รีวิวเกม/ล็อก)  
 - Phase A: heads-up+expanded = ใบเดียว · คัดลอกยอด · คัดลอกบัญชี**เต็ม** · active=ใบล่าสุด · **ต้องมี inbox ก่อน ship** · summary/throttle  
 - โลโก้ธนาคาร = **asset ในแอป** โชว์ทั้ง notify+inbox · ไม่โหลดเน็ต · ไม่รู้จักใช้ไอคอนทั่วไป  
 - Safety S0 แบบ A: มีสลิปแล้วซ่อนคัดลอก+อย่าโอนซ้ำ · สำเร็จลบคิว · fail แดงดัง ห้าม re-queue เงียบ  

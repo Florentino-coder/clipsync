@@ -1,5 +1,5 @@
 /**
- * Content script — confirm flow, canary health, pending_orders scrape.
+ * Content script — confirm flow, canary health, approved withdraw scrape (pending_orders wire).
  * Uses ClipSyncEngine (engine.js) for DOM logic.
  */
 

@@ -1,4 +1,4 @@
-"""Pure helpers for pending-order withdraw_notify payloads."""
+"""Pure helpers for approved-order withdraw_notify payloads."""
 
 from __future__ import annotations
 

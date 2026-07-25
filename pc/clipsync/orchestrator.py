@@ -183,7 +183,7 @@ class SlipOrchestrator:
             newly = new_orders_since(self._pending_orders, normalized)
             source = str(data.get("source") or "dom").strip() or "dom"
             scrape_msg = (
-                f"Pending scrape: {len(normalized)} order(s), "
+                f"Withdraw scrape: {len(normalized)} order(s), "
                 f"{len(newly)} new ({source})"
             )
             now = time.monotonic()

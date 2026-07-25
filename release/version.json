@@ -3,11 +3,11 @@
   "released_at": "2026-07-25",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.12",
+    "version": "0.9.13",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Activity log: Pending scrape N/new + WDRAW emit/skip reasons (wrong Jinbao tab visibility)."
+    "notes": "Withdraw scrape logs retargeted to approved tab (รายการที่อนุมัติแล้ว); pending รออนุมัติ no longer drives WDRAW."
   },
   "android": {
     "version": "0.9.8+31",
@@ -16,8 +16,8 @@
     "notes": "CI: patch desugaring into flutter-create Gradle instead of overwriting AGP9-incompatible build.gradle.kts."
   },
   "extension": {
-    "version": "1.0.38",
+    "version": "1.0.40",
     "download_url": "",
-    "notes": "Pending scrape keeps full account digits + name/account_name for withdraw_notify."
+    "notes": "withdraw_notify scrapes 「รายการที่อนุมัติแล้ว」 only; excludes 「รายการรออนุมัติ」. Whole-baht amounts + phone≠account."
   }
 }

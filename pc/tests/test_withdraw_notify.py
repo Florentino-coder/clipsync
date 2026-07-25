@@ -124,8 +124,8 @@ def test_on_pending_orders_emits_only_new(monkeypatch):
     assert sent[0]["order_id"] == "ORD-A"
     assert sent[1]["order_id"] == "ORD-B"
     assert sent[1]["account"] == "4444555566"
-    assert any("Pending scrape: 1 order(s), 1 new" in m for m in logs)
-    assert any("Pending scrape: 2 order(s), 1 new" in m for m in logs)
+    assert any("Withdraw scrape: 1 order(s), 1 new" in m for m in logs)
+    assert any("Withdraw scrape: 2 order(s), 1 new" in m for m in logs)
 
 
 def test_on_pending_orders_logs_skip_empty_account():
@@ -144,5 +144,5 @@ def test_on_pending_orders_logs_skip_empty_account():
     orch.on_pending_orders(
         {"source": "dom", "orders": [{"order_id": "ORD-Z", "amount": 10, "account": ""}]}
     )
-    assert any("Pending scrape: 1 order(s), 1 new" in m for m in logs)
+    assert any("Withdraw scrape: 1 order(s), 1 new" in m for m in logs)
     assert any("WDRAW skip: empty order_id/account" in m for m in logs)

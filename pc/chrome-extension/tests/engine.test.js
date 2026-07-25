@@ -17,6 +17,7 @@ const {
   findConfirmButton,
   checkCanary,
   scrapePendingOrders,
+  detectWithdrawNotifyTab,
   apiAdapter,
   runWorkflow,
   selectOption,
@@ -249,7 +250,7 @@ describe('deepFindByText + findRow + findConfirmButton', () => {
   it('scrapePendingOrders keeps full account digits and name when present', () => {
     const dom = new JSDOM(`<!DOCTYPE html><body>
       <table><tbody>
-        <tr><td>WD-7788</td><td>กสิกร</td><td>สมชาย ใจดี</td><td>4774090171</td><td>100.00</td>
+        <tr><td>WD-7788</td><td>กสิกร</td><td>สมชาย ใจดี</td><td>4774090171</td><td>100.00</td><td>อนุมัติแล้ว</td>
             <td><button>ยืนยัน</button></td></tr>
       </tbody></table>
     </body>`);
@@ -266,6 +267,77 @@ describe('deepFindByText + findRow + findConfirmButton', () => {
     assert.equal(hit.account_last4, '0171');
     const name = String(hit.name || hit.account_name || '');
     assert.match(name, /สมชาย/);
+  });
+
+  it('scrapePendingOrders accepts whole-baht amounts on approved rows', () => {
+    const dom = new JSDOM(`<!DOCTYPE html><body>
+      <div class="el-tabs__item is-active">รายการที่อนุมัติแล้ว</div>
+      <table class="el-table"><tbody>
+        <tr class="el-table__row">
+          <td>อนุมัติแล้ว</td>
+          <td>1000</td>
+          <td>1313378736</td>
+          <td>โคภีส โชติช่วง</td>
+          <td>0843462753</td>
+          <td>กสิกรไทย</td>
+        </tr>
+      </tbody></table>
+    </body>`);
+    global.document = dom.window.document;
+    const profile = {
+      profile_id: 'jinbao356_v1',
+      row_selector_hints: ['tr.el-table__row', 'tbody tr'],
+    };
+    const orders = scrapePendingOrders(profile);
+    assert.equal(orders.length, 1, JSON.stringify(orders));
+    assert.equal(orders[0].amount, '1000');
+    assert.equal(orders[0].account, '1313378736');
+    assert.equal(orders[0].order_id, 'acct:1313378736');
+    assert.match(String(orders[0].bank || ''), /KBANK/);
+    assert.match(String(orders[0].name || orders[0].account_name || ''), /โคภีส/);
+  });
+
+  it('scrapePendingOrders skips รออนุมัติ pending-approval rows', () => {
+    const dom = new JSDOM(`<!DOCTYPE html><body>
+      <div class="el-tabs__item is-active">รายการรออนุมัติ</div>
+      <table class="el-table"><tbody>
+        <tr class="el-table__row">
+          <td>รออนุมัติ</td>
+          <td>1000</td>
+          <td>1313378736</td>
+          <td>โคภีส โชติช่วง</td>
+          <td>กสิกรไทย</td>
+        </tr>
+      </tbody></table>
+    </body>`);
+    global.document = dom.window.document;
+    const profile = {
+      profile_id: 'jinbao356_v1',
+      row_selector_hints: ['tr.el-table__row', 'tbody tr'],
+    };
+    assert.equal(detectWithdrawNotifyTab(profile), false);
+    assert.equal(scrapePendingOrders(profile).length, 0);
+  });
+
+  it('scrapePendingOrders excludes รออนุมัติ status even on unknown tab', () => {
+    const dom = new JSDOM(`<!DOCTYPE html><body>
+      <table><tbody>
+        <tr>
+          <td>รออนุมัติ</td><td>500.00</td><td>4774090171</td><td>กสิกร</td>
+        </tr>
+        <tr>
+          <td>อนุมัติแล้ว</td><td>100.00</td><td>1234567890</td><td>กสิกร</td>
+        </tr>
+      </tbody></table>
+    </body>`);
+    global.document = dom.window.document;
+    const profile = {
+      profile_id: 'jinbao356_v1',
+      row_selector_hints: ['table tbody tr'],
+    };
+    const orders = scrapePendingOrders(profile);
+    assert.equal(orders.length, 1, JSON.stringify(orders));
+    assert.equal(orders[0].account, '1234567890');
   });
 });
 
