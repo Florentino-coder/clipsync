@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'clip_service.dart';
@@ -83,20 +84,45 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _setSlipEnabled(bool enabled) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(kSlipAutoConfirmPrefKey, enabled);
+    if (_busy) return;
     setState(() {
-      _slipEnabled = enabled;
+      _busy = true;
     });
-    if (!enabled) {
-      await _stopSlipStack();
-      _addEvent('Slip capture OFF');
-      return;
-    }
-    _addEvent('Slip capture ON');
-    await _maybeStartSlipStack();
-    if (_slipBootstrap == null) {
-      _addEvent('Slip: need QR with secret + Start Sync first');
+    try {
+      if (!enabled) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(kSlipAutoConfirmPrefKey, false);
+        if (!mounted) return;
+        setState(() {
+          _slipEnabled = false;
+        });
+        await _stopSlipStack();
+        _addEvent('Slip capture OFF');
+        return;
+      }
+
+      // Request gallery permission BEFORE flipping the switch durable state.
+      // Otherwise the Allow tap on the system dialog can fall through onto the
+      // SwitchListTile and immediately turn Slip capture OFF again.
+      await Permission.photos.request();
+      if (!mounted) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kSlipAutoConfirmPrefKey, true);
+      setState(() {
+        _slipEnabled = true;
+      });
+      _addEvent('Slip capture ON');
+      await _maybeStartSlipStack();
+      if (_slipBootstrap == null) {
+        _addEvent('Slip: need QR with secret + Start Sync first');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+        });
+      }
     }
   }
 

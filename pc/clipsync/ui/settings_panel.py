@@ -139,7 +139,7 @@ class SettingsPanel:
 
         row = 0
         ttk.Checkbutton(
-            form, text="Auto-confirm", variable=self._auto_confirm
+            form, text="Auto-confirm (ยืนยันอัตโนมัติ)", variable=self._auto_confirm
         ).grid(row=row, column=0, columnspan=2, sticky="w", pady=4)
         row += 1
         ttk.Checkbutton(

@@ -45,7 +45,7 @@ from clipsync.ui.debug_panel import DebugPanel
 from clipsync.ui.settings_panel import SettingsPanel
 
 APP_NAME = "ClipSync PC"
-APP_VERSION = "0.9.5"
+APP_VERSION = "0.9.6"
 AUTHOR_NAME = "Florentino356"
 DEFAULT_RELAY_URL = "wss://clipsync-relay.onrender.com"
 UPDATE_MANIFEST_URL = (
@@ -698,6 +698,15 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
             font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w", pady=(0, 8))
 
+        self.auto_confirm_var = tk.StringVar(value="Auto-confirm: …")
+        ttk.Label(
+            outer,
+            textvariable=self.auto_confirm_var,
+            style="Muted.TLabel",
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", pady=(0, 8))
+        self._refresh_auto_confirm_label()
+
         self.update_frame = ttk.Frame(outer, style="Card.TFrame")
         self.update_var = tk.StringVar(value="")
         ttk.Label(
@@ -820,7 +829,30 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
         if self._on_slip_config_reload is not None:
             self._on_slip_config_reload(cfg)
         mode = (cfg.get("transport") or {}).get("preferred_mode", "?")
-        self._append_log(f"Slip config reloaded (transport={mode})")
+        ac_on = bool((cfg.get("auto_confirm") or {}).get("enabled", False))
+        ac_label = "ON" if ac_on else "OFF"
+        self._refresh_auto_confirm_label(cfg)
+        self._append_log(
+            f"Slip config reloaded (transport={mode}, Auto-confirm: {ac_label})"
+        )
+
+    def _refresh_auto_confirm_label(self, cfg: Optional[Mapping[str, Any]] = None) -> None:
+        """Clipboard-tab status: Auto-confirm เปิด/ปิด from live slip config."""
+        var = getattr(self, "auto_confirm_var", None)
+        if var is None:
+            return
+        try:
+            if cfg is not None:
+                data: Mapping[str, Any] = cfg
+            else:
+                from clipsync.config import load_config as load_slip_config
+
+                data = load_slip_config()
+        except Exception:
+            var.set("Auto-confirm: ?")
+            return
+        enabled = bool((data.get("auto_confirm") or {}).get("enabled", False))
+        var.set("Auto-confirm: เปิด" if enabled else "Auto-confirm: ปิด")
 
     def _on_slip_view(self, event: Mapping[str, Any]) -> None:
         if messagebox is None:
@@ -906,40 +938,14 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
             slip_payload["sender_account_last4"] = event.get("senderAccountLast4")
         if "sender_account_masked" not in slip_payload and event.get("senderAccountMasked"):
             slip_payload["sender_account_masked"] = event.get("senderAccountMasked")
-        # The close-job form needs the payer ("จาก") last4. If the event carries
-        # the masked template (e.g. "xxxxxx7476") but no explicit last4, derive
-        # it from the trailing digits — no OCR needed.
-        if not slip_payload.get("sender_account_last4"):
-            masked = slip_payload.get("sender_account_masked") or event.get(
-                "senderAccountMasked"
-            )
-            if masked:
-                digits = "".join(ch for ch in str(masked) if ch.isdigit())
-                if len(digits) >= 4:
-                    slip_payload["sender_account_last4"] = digits[-4:]
-                    self._append_log(
-                        f"Slip: payer last4 derived from mask = {digits[-4:]}"
-                    )
-        # Optional Tesseract last resort — never required for a successful push.
-        if not slip_payload.get("sender_account_last4"):
-            thumb = event.get("thumbnail_jpeg_b64")
-            if isinstance(thumb, str) and thumb:
-                try:
-                    from clipsync.slip_image import decode_thumbnail_jpeg
-                    from clipsync.slip_ocr import extract_sender_account_last4
+        # Same enrichment as auto-confirm (mask → optional thumbnail OCR).
+        from clipsync.slip_ocr import resolve_sender_account_last4
 
-                    raw_img = decode_thumbnail_jpeg(thumb)
-                    last4 = extract_sender_account_last4(raw_img) if raw_img else None
-                    if last4:
-                        slip_payload["sender_account_last4"] = last4
-                        self._append_log(f"Slip OCR: payer account last4 = {last4}")
-                    else:
-                        self._append_log(
-                            "Slip OCR: payer account not readable "
-                            "(Tesseract missing or image unclear)"
-                        )
-                except Exception as exc:  # pragma: no cover - defensive
-                    self._append_log(f"Slip OCR failed: {exc}")
+        resolved_last4 = resolve_sender_account_last4(event)
+        if resolved_last4:
+            if not slip_payload.get("sender_account_last4"):
+                self._append_log(f"Slip: payer last4 resolved = {resolved_last4}")
+            slip_payload["sender_account_last4"] = resolved_last4
 
         if not slip_payload.get("sender_account_last4"):
             self._append_log(

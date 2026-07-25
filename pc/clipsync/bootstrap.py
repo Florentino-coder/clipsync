@@ -132,8 +132,14 @@ class SlipBootstrap:
             source = "usb"
             if self._manager and self._manager.transport_name == "relay":
                 source = "relay"
-            result = await self._orchestrator.handle_slip_event(payload, source=source)
-            self._push_ui_event(payload, result)
+            thumb = payload.get("thumbnail_jpeg_b64")
+            thumb_s = thumb if isinstance(thumb, str) else None
+            result = await self._orchestrator.handle_slip_event(
+                payload,
+                source=source,
+                thumbnail_jpeg_b64=thumb_s,
+            )
+            self._push_ui_event(payload, result, thumbnail_jpeg_b64=thumb_s)
 
         await self._bridge.start()
         await self._manager.start(on_slip_event)
@@ -146,9 +152,11 @@ class SlipBootstrap:
         self._app.after(0, lambda: self._app.set_slip_override_bridge(self._bridge))
         self._app.after(0, lambda: self._app.set_slip_orchestrator(self._orchestrator))
         port = self._bridge.port if self._bridge else 8765
+        ac_on = bool((cfg.get("auto_confirm") or {}).get("enabled", False))
+        ac_label = "ON" if ac_on else "OFF"
         self._app_log(
             f"Slip stack started — Chrome bridge listening on ws://127.0.0.1:{port} "
-            "(auto_confirm off unless enabled in Settings)"
+            f"(Auto-confirm: {ac_label})"
         )
 
         while not self._stop_event.is_set():
@@ -176,13 +184,14 @@ class SlipBootstrap:
             if not isinstance(payload, dict):
                 return
             sig = str(msg.get("sig") or "")
+            thumb = msg.get("thumbnail_jpeg_b64")
+            thumb_s = thumb if isinstance(thumb, str) else None
             result = await self._orchestrator.handle_slip_event(
                 payload,
                 source="relay",
                 sig=sig,
+                thumbnail_jpeg_b64=thumb_s,
             )
-            thumb = msg.get("thumbnail_jpeg_b64")
-            thumb_s = thumb if isinstance(thumb, str) else None
             self._push_ui_event(payload, result, thumbnail_jpeg_b64=thumb_s)
 
         return _handle
@@ -279,6 +288,11 @@ class SlipBootstrap:
             thumbnail_jpeg_b64=thumbnail_jpeg_b64,
             transport=self._manager.transport_name if self._manager else None,
         )
+        decision = result.get("decision")
+        reason = result.get("reason")
+        if decision == "pending_review" and reason:
+            amount = payload.get("amount")
+            self._app_log(f"Slip รอตรวจ ({amount}): {reason}")
 
         def _enqueue() -> None:
             self._app.push_slip_ui_event(ui_event)

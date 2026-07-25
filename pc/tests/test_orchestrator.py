@@ -234,24 +234,59 @@ async def test_relay_valid_hmac_proceeds(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_parse_failed_pending_review_no_confirm(tmp_path: Path):
+async def test_soft_parse_failed_null_ref_still_auto_confirms(tmp_path: Path):
+    """Production: ref_number null → mobile parse_failed=true → must still auto.
+
+    Live audits for 1006.00 had From last4 + amount but only pending_review /
+    admin_manual — never auto_confirmed.
+    """
     bridge = MagicMock()
     bridge.push_confirm_order = AsyncMock()
     orch = _make_orchestrator(tmp_path, bridge)
     orch.on_pending_orders(
         {
             "type": "pending_orders",
-            "orders": [{"orderId": "1234", "amount": 350.0, "accountLast4": "6789"}],
+            "orders": [
+                {
+                    "orderId": "acct:2864560012",
+                    "amount": 1006.0,
+                    "accountLast4": "0012",
+                }
+            ],
         }
     )
 
-    event = {**EVENT, "event_id": "evt-pf", "parse_failed": True}
-    result = await orch.handle_slip_event(event, source="usb")
+    event = {
+        **EVENT,
+        "event_id": "evt-1006",
+        "amount": 1006.0,
+        "receiver_account_last4": "0012",
+        "sender_account_last4": "7476",
+        "ref_number": None,
+        "parse_failed": True,
+        "ocr_confidence": 0.0,
+    }
 
-    bridge.push_confirm_order.assert_not_awaited()
-    assert result["decision"] == "pending_review"
+    async def _reply() -> None:
+        await asyncio.sleep(0.02)
+        orch.on_confirm_result(
+            {
+                "type": "confirm_result",
+                "orderId": "acct:2864560012",
+                "ok": True,
+                "verified": True,
+                "reason": None,
+            }
+        )
+
+    t = asyncio.create_task(_reply())
+    result = await orch.handle_slip_event(event, source="usb")
+    await t
+
+    bridge.push_confirm_order.assert_awaited_once()
+    assert result["decision"] == "auto_confirmed"
     audits = _audit_lines(tmp_path / "audit.jsonl")
-    assert any(a.get("decision") == "pending_review" for a in audits)
+    assert any(a.get("decision") == "auto_confirmed" for a in audits)
 
 
 @pytest.mark.asyncio
@@ -520,3 +555,75 @@ async def test_auto_confirm_when_ocr_confidence_is_zero_unknown(tmp_path: Path):
     assert result["decision"] == "auto_confirmed"
     audits = _audit_lines(tmp_path / "audit.jsonl")
     assert any(a.get("decision") == "auto_confirmed" for a in audits)
+
+
+@pytest.mark.asyncio
+async def test_pending_review_records_reason_when_disabled(tmp_path: Path):
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    cfg = {
+        **CFG,
+        "auto_confirm": {**CFG["auto_confirm"], "enabled": False},
+    }
+    orch = _make_orchestrator(tmp_path, bridge, cfg=cfg)
+    result = await orch.handle_slip_event(EVENT, source="usb")
+    assert result["decision"] == "pending_review"
+    assert result.get("reason") == "auto_confirm_disabled"
+    audits = _audit_lines(tmp_path / "audit.jsonl")
+    assert audits[-1].get("reason") == "auto_confirm_disabled"
+    bridge.push_confirm_order.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_confirm_from_masked_sender_without_explicit_last4(tmp_path: Path):
+    """Live bug: OCR had masked from-account but no sender_account_last4.
+
+    Manual ยืนยันเอง derived last4 from the mask; auto previously skipped.
+    """
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+
+    event = {
+        **EVENT,
+        "event_id": "evt-mask",
+        "sender_account_last4": None,
+        "sender_account_masked": "xxxxxx7476",
+        "ocr_confidence": 0.0,
+    }
+
+    async def _reply() -> None:
+        await asyncio.sleep(0.02)
+        orch.on_confirm_result(
+            {
+                "type": "confirm_result",
+                "orderId": "350.00",
+                "matchKey": "350.00",
+                "ok": True,
+                "verified": True,
+                "reason": None,
+            }
+        )
+
+    t = asyncio.create_task(_reply())
+    result = await orch.handle_slip_event(event, source="usb")
+    await t
+
+    bridge.push_confirm_order.assert_awaited_once()
+    slip = bridge.push_confirm_order.await_args.kwargs.get("slip") or {}
+    assert slip.get("sender_account_last4") == "7476"
+    assert result["decision"] == "auto_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_missing_sender_last4_pending_with_reason(tmp_path: Path):
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+    event = {**EVENT, "event_id": "evt-nolast4", "sender_account_last4": None}
+    event.pop("sender_account_masked", None)
+    result = await orch.handle_slip_event(event, source="usb")
+    assert result["decision"] == "pending_review"
+    assert result.get("reason") == "missing_sender_last4"
+    bridge.push_confirm_order.assert_not_awaited()
+

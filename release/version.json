@@ -3,17 +3,17 @@
   "released_at": "2026-07-25",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.5",
+    "version": "0.9.6",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Treat ML Kit ocr_confidence 0.0 as unknown so auto-confirm fires (manual path already worked)."
+    "notes": "Do not block auto-confirm on soft parse_failed (null ref); Clipboard shows Auto-confirm เปิด/ปิด; audit reason + payer last4 enrichment."
   },
   "android": {
-    "version": "0.9.3+24",
+    "version": "0.9.4+25",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "SCB masked-sender OCR fix — applicationId com.clipsync.mobile_build.test"
+    "notes": "Slip capture: request Photos permission while switch is locked busy so Allow tap cannot flip it OFF."
   },
   "extension": {
     "version": "1.0.36",

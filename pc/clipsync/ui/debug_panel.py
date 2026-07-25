@@ -214,6 +214,7 @@ def format_slip_details(event: Mapping[str, Any]) -> str:
         f"  ธนาคาร: {g('receiver_bank', 'receiver_bank_name_th', 'receiver_bank_name')}",
         "",
         f"สถานะ: {status_display_label(str(event.get('decision') or event.get('status') or ''))}",
+        f"เหตุผล: {g('reason', 'fail_reason')}",
         f"Transport: {g('transport', 'source')}",
         f"Ref: {g('ref_number', 'ref')}",
         f"Order: {g('order_id', 'orderId')}",

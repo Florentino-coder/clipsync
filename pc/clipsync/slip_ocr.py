@@ -20,7 +20,7 @@ import io
 import os
 import re
 import shutil
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 # Markers that introduce the payer line ("จาก" = from).
 _FROM_MARKERS = ("จาก", "From", "FROM", "from")
@@ -164,3 +164,43 @@ def extract_sender_account_last4(image_bytes: bytes) -> Optional[str]:
     if not text:
         return None
     return parse_sender_last4_from_text(text)
+
+
+def resolve_sender_account_last4(
+    event: Mapping[str, Any],
+    *,
+    thumbnail_jpeg_b64: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve payer (จาก) last4 for confirm — same path as manual ยืนยันเอง.
+
+    Order: explicit last4 → masked trailing digits → optional thumbnail OCR.
+    """
+    last4 = str(event.get("sender_account_last4") or "").strip()
+    if not last4 and event.get("senderAccountLast4"):
+        last4 = str(event.get("senderAccountLast4")).strip()
+    digits = "".join(ch for ch in last4 if ch.isdigit())
+    if len(digits) >= 4:
+        return digits[-4:]
+
+    masked = event.get("sender_account_masked") or event.get("senderAccountMasked")
+    if masked:
+        masked_digits = "".join(ch for ch in str(masked) if ch.isdigit())
+        if len(masked_digits) >= 4:
+            return masked_digits[-4:]
+
+    thumb = thumbnail_jpeg_b64
+    if not thumb:
+        raw_thumb = event.get("thumbnail_jpeg_b64")
+        thumb = raw_thumb if isinstance(raw_thumb, str) else None
+    if isinstance(thumb, str) and thumb:
+        try:
+            from clipsync.slip_image import decode_thumbnail_jpeg
+
+            raw_img = decode_thumbnail_jpeg(thumb)
+            if raw_img:
+                ocr_last4 = extract_sender_account_last4(raw_img)
+                if ocr_last4:
+                    return ocr_last4
+        except Exception:
+            return None
+    return None

@@ -15,7 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // - ws://YOUR_VPS_IP:8765
 // - wss://clipsync-relay.onrender.com
 const kRelayUrl = 'wss://clipsync-relay.onrender.com';
-const kAppVersion = '0.9.0+21';
+const kAppVersion = '0.9.4+25';
 
 /// SharedPreferences key for pairing v2 HMAC secret (see [slip_bootstrap.dart]).
 const kSharedSecretPrefKey = 'shared_secret';

@@ -13,13 +13,14 @@ from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Optional
 from clipsync.audit import append_audit
 from clipsync.config import user_data_dir
 from clipsync.matcher import (
+    auto_confirm_block_reason,
     is_reliable_order_id,
     load_used_refs,
     resolve_auto_match,
     save_used_refs,
-    should_auto_confirm,
 )
 from clipsync.seen_events import SeenEvents, default_seen_events_path
+from clipsync.slip_ocr import resolve_sender_account_last4
 
 logger = logging.getLogger(__name__)
 
@@ -191,10 +192,13 @@ class SlipOrchestrator:
         *,
         source: str = "usb",
         sig: Optional[str] = None,
+        thumbnail_jpeg_b64: Optional[str] = None,
     ) -> dict[str, Any]:
         event_id = str(event.get("event_id") or "")
         if not event_id:
-            return self._audit_and_return(event, None, "rejected", confirmed_by=None)
+            return self._audit_and_return(
+                event, None, "rejected", confirmed_by=None, reason="missing_event_id"
+            )
 
         if self._seen.is_duplicate(event_id):
             await self._emit_ack(event_id)
@@ -203,19 +207,34 @@ class SlipOrchestrator:
         if source == "relay":
             if not _verify_slip_payload_sig(self._shared_secret, event, sig or ""):
                 # Still ack so the phone stops resending a rejected payload.
-                result = self._audit_and_return(event, None, "rejected", confirmed_by=None)
+                result = self._audit_and_return(
+                    event, None, "rejected", confirmed_by=None, reason="bad_sig"
+                )
                 await self._emit_ack(event_id)
                 return result
 
         self._seen.mark(event_id)
 
+        # Work on a mutable copy so we can attach derived payer last4 for confirm.
+        event_data = dict(event)
+        sender_last4 = resolve_sender_account_last4(
+            event_data, thumbnail_jpeg_b64=thumbnail_jpeg_b64
+        )
+        if sender_last4:
+            event_data["sender_account_last4"] = sender_last4
+
         matched = resolve_auto_match(
-            event, self._pending_orders, self._cfg, used_refs=self._used_refs
+            event_data, self._pending_orders, self._cfg, used_refs=self._used_refs
         )
 
-        if not should_auto_confirm(event, matched, self._cfg):
+        block_reason = auto_confirm_block_reason(event_data, matched, self._cfg)
+        if block_reason is not None:
             result = self._audit_and_return(
-                event, matched, "pending_review", confirmed_by=None
+                event_data,
+                matched,
+                "pending_review",
+                confirmed_by=None,
+                reason=block_reason,
             )
             await self._emit_ack(event_id)
             return result
@@ -223,22 +242,17 @@ class SlipOrchestrator:
         assert matched is not None
         # Close-job account select needs payer last4; without it extension returns
         # missing_select_value — keep in review instead of a guaranteed fail.
-        sender_last4 = str(event.get("sender_account_last4") or "").strip()
         if not sender_last4:
-            masked = event.get("sender_account_masked") or event.get("senderAccountMasked")
-            if masked:
-                digits = "".join(ch for ch in str(masked) if ch.isdigit())
-                if len(digits) >= 4:
-                    sender_last4 = digits[-4:]
-        if not sender_last4 and event.get("senderAccountLast4"):
-            sender_last4 = str(event.get("senderAccountLast4")).strip()
-        if len("".join(ch for ch in sender_last4 if ch.isdigit())) < 4:
             logger.info(
                 "auto-confirm skipped: missing sender_account_last4 event_id=%s",
                 event_id,
             )
             result = self._audit_and_return(
-                event, matched, "pending_review", confirmed_by=None
+                event_data,
+                matched,
+                "pending_review",
+                confirmed_by=None,
+                reason="missing_sender_last4",
             )
             await self._emit_ack(event_id)
             return result
@@ -248,7 +262,7 @@ class SlipOrchestrator:
             order_id = ""
         # Extension finds the Jinbao row by orderId OR amount OR ref; amount+slip
         # are required for same-amount disambiguation (same path as manual confirm).
-        amount = event.get("amount")
+        amount = event_data.get("amount")
         amount_key = ""
         try:
             if amount is not None and str(amount).strip() != "":
@@ -259,7 +273,11 @@ class SlipOrchestrator:
         push_id = order_id or amount_key
         if not push_id:
             result = self._audit_and_return(
-                event, matched, "pending_review", confirmed_by=None
+                event_data,
+                matched,
+                "pending_review",
+                confirmed_by=None,
+                reason="missing_push_id",
             )
             await self._emit_ack(event_id)
             return result
@@ -274,15 +292,19 @@ class SlipOrchestrator:
             await self._bridge.push_confirm_order(
                 push_id,
                 amount=amount_key or amount,
-                ref_number=event.get("ref_number"),
-                slip=dict(event),
+                ref_number=event_data.get("ref_number"),
+                slip=dict(event_data),
                 event_id=event_id,
             )
             try:
                 result = await asyncio.wait_for(fut, timeout=self._confirm_timeout)
             except asyncio.TimeoutError:
                 out = self._audit_and_return(
-                    event, matched, "confirm_failed", confirmed_by=None
+                    event_data,
+                    matched,
+                    "confirm_failed",
+                    confirmed_by=None,
+                    reason="timeout",
                 )
                 await self._emit_ack(event_id)
                 return out
@@ -291,20 +313,21 @@ class SlipOrchestrator:
                 result.get("verified") is True
                 or result.get("reason") in (None, "", "ok", "already_confirmed")
             ):
-                ref = event.get("ref_number")
+                ref = event_data.get("ref_number")
                 if ref is not None:
                     self._used_refs.add(str(ref))
                     save_used_refs(self._used_refs, self._used_refs_path)
                 out = self._audit_and_return(
-                    event, matched, "auto_confirmed", confirmed_by="system"
+                    event_data, matched, "auto_confirmed", confirmed_by="system"
                 )
                 await self._emit_ack(event_id)
                 return out
             out = self._audit_and_return(
-                event,
+                event_data,
                 matched,
                 "confirm_failed",
                 confirmed_by=None,
+                reason=str(result.get("reason") or "confirm_not_ok"),
             )
             await self._emit_ack(event_id)
             return out
@@ -321,6 +344,7 @@ class SlipOrchestrator:
         decision: str,
         *,
         confirmed_by: Optional[str],
+        reason: Optional[str] = None,
     ) -> dict[str, Any]:
         record = {
             "event_id": event.get("event_id"),
@@ -330,9 +354,14 @@ class SlipOrchestrator:
             "decision": decision,
             "confirmed_by": confirmed_by,
         }
+        if reason:
+            record["reason"] = reason
         append_audit(record, path=self._audit_path)
-        return {
+        out = {
             "decision": decision,
             "event_id": event.get("event_id"),
             "order_id": record["order_id"],
         }
+        if reason:
+            out["reason"] = reason
+        return out

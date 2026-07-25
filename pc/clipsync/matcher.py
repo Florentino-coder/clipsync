@@ -229,20 +229,23 @@ def resolve_auto_match(
     }
 
 
-def should_auto_confirm(
+def auto_confirm_block_reason(
     ocr: Mapping[str, Any],
     matched_order: Optional[Mapping[str, Any]],
     cfg: Mapping[str, Any],
-) -> bool:
-    """Return True only when it is safe to auto-confirm the matched order."""
+) -> Optional[str]:
+    """Return why auto-confirm must not run, or None when it is safe."""
     if matched_order is None:
-        return False
-    if ocr.get("parse_failed"):
-        return False
+        return "no_match"
+    # Soft parse_failed (e.g. mobile ref_invalid when OCR misses the long ref)
+    # must NOT block auto-confirm when amount matched — live audits showed
+    # ref_number=null + parse_failed on every slip while manual confirm worked.
+    if ocr.get("parse_failed") and not _amount_present(ocr.get("amount")):
+        return "parse_failed"
 
     ac = _auto_confirm_cfg(cfg)
     if not ac.get("enabled", False):
-        return False
+        return "auto_confirm_disabled"
 
     confidence_raw = ocr.get("ocr_confidence")
     if confidence_raw is not None and str(confidence_raw).strip() != "":
@@ -253,7 +256,7 @@ def should_auto_confirm(
         if confidence > 0.0:
             min_conf = float(ac.get("min_ocr_confidence") or 0.0)
             if confidence < min_conf:
-                return False
+                return "low_ocr_confidence"
     # Missing / unknown (0.0) confidence: allow when master switch is on.
 
     review = ac.get("require_manual_review") or {}
@@ -261,9 +264,18 @@ def should_auto_confirm(
         amount = float(ocr.get("amount") or 0.0)
         threshold = float(review.get("amount_threshold") or 0.0)
         if amount >= threshold:
-            return False
+            return "over_amount_threshold"
 
-    return True
+    return None
+
+
+def should_auto_confirm(
+    ocr: Mapping[str, Any],
+    matched_order: Optional[Mapping[str, Any]],
+    cfg: Mapping[str, Any],
+) -> bool:
+    """Return True only when it is safe to auto-confirm the matched order."""
+    return auto_confirm_block_reason(ocr, matched_order, cfg) is None
 
 
 def load_used_refs(path: Path | str) -> set[str]:

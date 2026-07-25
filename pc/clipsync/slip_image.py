@@ -20,6 +20,9 @@ def ui_event_with_thumbnail(
         "order_id": result.get("order_id"),
         "transport": transport,
     }
+    reason = result.get("reason")
+    if reason is not None and str(reason).strip() != "":
+        out["reason"] = reason
     if isinstance(thumbnail_jpeg_b64, str) and thumbnail_jpeg_b64:
         out["thumbnail_jpeg_b64"] = thumbnail_jpeg_b64
     return out

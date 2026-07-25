@@ -4,8 +4,10 @@ API choices:
 - ``match_order`` returns the single matching order dict, or ``None`` when there
   is no match, a duplicate ref, or an ambiguous (>1) match. Ambiguous matches
   never auto-confirm because ``should_auto_confirm`` requires a concrete match.
-- ``should_auto_confirm`` returns False when match is None / ambiguous, parse
-  failed, master switch off, confidence too low, or amount needs manual review.
+- ``should_auto_confirm`` returns False when match is None / ambiguous, amount
+  missing with parse_failed, master switch off, confidence too low, or amount
+  needs manual review. Soft parse_failed (null ref) with a usable amount still
+  auto-confirms.
 """
 
 from __future__ import annotations
@@ -123,9 +125,22 @@ def test_master_switch_off():
     assert should_auto_confirm(OCR, matched, cfg) is False
 
 
-def test_parse_failed_never_confirms():
-    ocr = {**OCR, "parse_failed": True}
+def test_soft_parse_failed_with_amount_still_auto_confirms():
+    """Live bug: mobile sets parse_failed when ref OCR misses (ref_number null).
+
+    Audit for 1006/1669 had parse-able amount + accounts but every slip stayed
+    pending_review while manual ยืนยันเอง worked — parse_failed was a hard gate.
+    """
+    ocr = {**OCR, "parse_failed": True, "ref_number": None}
     matched = match_order(ocr, ORDERS, CFG, used_refs=set())
+    assert matched is not None
+    assert should_auto_confirm(ocr, matched, CFG) is True
+
+
+def test_parse_failed_without_amount_still_blocks():
+    ocr = {**OCR, "parse_failed": True, "amount": None}
+    matched = match_order(ocr, ORDERS, CFG, used_refs=set())
+    assert matched is None
     assert should_auto_confirm(ocr, matched, CFG) is False
 
 
@@ -351,6 +366,27 @@ def test_low_but_nonzero_ocr_confidence_still_blocks():
     matched = match_order(OCR, ORDERS, CFG, used_refs=set())
     ocr = {**OCR, "ocr_confidence": 0.5}
     assert should_auto_confirm(ocr, matched, CFG) is False
+    from clipsync.matcher import auto_confirm_block_reason
+
+    assert auto_confirm_block_reason(ocr, matched, CFG) == "low_ocr_confidence"
+
+
+def test_auto_confirm_block_reason_disabled():
+    from clipsync.matcher import auto_confirm_block_reason
+
+    matched = match_order(OCR, ORDERS, CFG, used_refs=set())
+    cfg = {**CFG, "auto_confirm": {**CFG["auto_confirm"], "enabled": False}}
+    assert auto_confirm_block_reason(OCR, matched, cfg) == "auto_confirm_disabled"
+
+
+def test_resolve_sender_account_last4_from_mask():
+    from clipsync.slip_ocr import resolve_sender_account_last4
+
+    assert (
+        resolve_sender_account_last4({"sender_account_masked": "xxxxxx7476"}) == "7476"
+    )
+    assert resolve_sender_account_last4({"sender_account_last4": "1234"}) == "1234"
+    assert resolve_sender_account_last4({}) is None
 
 
 def test_resolve_auto_match_amount_only_when_scrape_empty():
