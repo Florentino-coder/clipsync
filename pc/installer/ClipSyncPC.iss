@@ -1,5 +1,5 @@
 #define MyAppName "ClipSync PC"
-#define MyAppVersion "0.9.0"
+#define MyAppVersion "0.9.8"
 #define MyAppPublisher "Florentino356"
 #define MyAppExeName "ClipSyncPC.exe"
 
@@ -30,9 +30,13 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "..\dist\ClipSyncPC\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Stable Load unpacked path — overwrite on every Setup so Chrome Reload picks up updates.
+Source: "..\dist\ClipSyncPC\chrome-extension\*"; DestDir: "{userappdata}\ClipSync\chrome-extension"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"
+; Clean orphan files under the stable extension folder before re-copy (do not touch other ClipSync AppData).
+Type: filesandordirs; Name: "{userappdata}\ClipSync\chrome-extension"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

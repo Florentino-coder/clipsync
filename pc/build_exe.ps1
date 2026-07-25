@@ -20,6 +20,21 @@ Remove-Item -Force .\dist\ClipSyncPC.exe -ErrorAction SilentlyContinue
     --clean `
     ClipSyncPC.spec
 
+# Expose chrome-extension at onedir root for Inno Setup Source (stable path install).
+$onedir = Join-Path $PSScriptRoot "dist\ClipSyncPC"
+$extRoot = Join-Path $onedir "chrome-extension"
+$extInternal = Join-Path $onedir "_internal\chrome-extension"
+if (-not (Test-Path (Join-Path $extRoot "manifest.json"))) {
+    if (Test-Path (Join-Path $extInternal "manifest.json")) {
+        if (Test-Path $extRoot) {
+            Remove-Item -Recurse -Force $extRoot
+        }
+        Copy-Item -Recurse -Force $extInternal $extRoot
+    } elseif (Test-Path "$PSScriptRoot\chrome-extension\manifest.json") {
+        Copy-Item -Recurse -Force "$PSScriptRoot\chrome-extension" $extRoot
+    }
+}
+
 $root = $PSScriptRoot
 $extraData = @('--add-data', "$root\assets\clipsync_icon.png;assets")
 if (Test-Path "$root\chrome-extension\manifest.json") {

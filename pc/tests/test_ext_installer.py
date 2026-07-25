@@ -47,20 +47,54 @@ def extension_tree(tmp_path: Path) -> Path:
     return ext
 
 
-def test_extension_dir_resolves_under_base(tmp_path: Path, extension_tree: Path):
-    assert ext_installer.extension_dir(base=tmp_path) == extension_tree
+def test_stable_extension_dir_under_appdata(tmp_path: Path):
+    expected = tmp_path / "ClipSync" / "chrome-extension"
+    assert ext_installer.stable_extension_dir(appdata=tmp_path) == expected
+    assert ext_installer.extension_dir(appdata=tmp_path) == expected
 
 
-def test_copy_extension_path_copies_absolute_path(
-    tmp_path: Path, extension_tree: Path, monkeypatch: pytest.MonkeyPatch
+def test_bundled_extension_dir_resolves_under_base(tmp_path: Path, extension_tree: Path):
+    assert ext_installer.bundled_extension_dir(base=tmp_path) == extension_tree
+
+
+def test_copy_extension_path_copies_stable_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     copied: list[str] = []
     monkeypatch.setattr(ext_installer.pyperclip, "copy", lambda value: copied.append(value))
+    expected = (tmp_path / "ClipSync" / "chrome-extension").resolve()
 
-    result = ext_installer.copy_extension_path(base=tmp_path)
+    result = ext_installer.copy_extension_path(appdata=tmp_path)
 
-    assert result == str(extension_tree.resolve())
-    assert copied == [str(extension_tree.resolve())]
+    assert result == str(expected)
+    assert copied == [str(expected)]
+
+
+def test_ensure_stable_extension_installed_copies_and_overwrites(tmp_path: Path):
+    source = tmp_path / "bundle" / "chrome-extension"
+    source.mkdir(parents=True)
+    (source / "manifest.json").write_text(
+        json.dumps({"manifest_version": 3, "version": "1.0.1"}),
+        encoding="utf-8",
+    )
+    (source / "background.js").write_text("// v1", encoding="utf-8")
+    appdata = tmp_path / "Roaming"
+    dest = appdata / "ClipSync" / "chrome-extension"
+    dest.mkdir(parents=True)
+    (dest / "manifest.json").write_text(
+        json.dumps({"manifest_version": 3, "version": "1.0.0"}),
+        encoding="utf-8",
+    )
+    (dest / "orphan.txt").write_text("stale", encoding="utf-8")
+
+    result = ext_installer.ensure_stable_extension_installed(
+        source=source, appdata=appdata
+    )
+
+    assert result == dest
+    assert ext_installer.local_manifest_version(dest) == "1.0.1"
+    assert (dest / "background.js").read_text(encoding="utf-8") == "// v1"
+    assert not (dest / "orphan.txt").exists()
 
 
 def test_open_chrome_extensions_launches_chrome(
@@ -102,7 +136,7 @@ def test_open_chrome_extensions_returns_fallback_when_popen_fails(
     assert "manually" in message.lower()
 
 
-def test_guide_install_copies_path_and_opens_chrome(
+def test_guide_install_ensures_stable_path_and_opens_chrome(
     tmp_path: Path, extension_tree: Path, monkeypatch: pytest.MonkeyPatch
 ):
     copied: list[str] = []
@@ -113,12 +147,27 @@ def test_guide_install_copies_path_and_opens_chrome(
         lambda *_a, **_k: MagicMock(),
     )
     monkeypatch.setattr(ext_installer, "tk", None)
+    appdata = tmp_path / "Roaming"
+    stable = appdata / "ClipSync" / "chrome-extension"
 
-    message = ext_installer.guide_install(base=tmp_path)
+    message = ext_installer.guide_install(source=extension_tree, appdata=appdata)
 
-    assert copied == [str(extension_tree.resolve())]
-    assert str(extension_tree.resolve()) in message
+    assert stable.is_dir()
+    assert (stable / "manifest.json").is_file()
+    assert copied == [str(stable.resolve())]
+    assert str(stable.resolve()) in message
     assert "chrome://extensions/" in message
+
+
+def test_site_profiles_dir_prefers_stable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    appdata = tmp_path / "Roaming"
+    stable_profiles = appdata / "ClipSync" / "chrome-extension" / "profiles"
+    stable_profiles.mkdir(parents=True)
+    (stable_profiles / "jinbao356_v1.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(appdata))
+
+    resolved = ext_installer.site_profiles_dir(base=tmp_path / "empty-base")
+    assert resolved == stable_profiles
 
 
 def test_local_manifest_version(extension_tree: Path):

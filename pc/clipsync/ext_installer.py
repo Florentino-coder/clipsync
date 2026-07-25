@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ except Exception:  # pragma: no cover - used only when Tk is unavailable.
 EXTENSION_DIRNAME = "chrome-extension"
 MANIFEST_NAME = "manifest.json"
 DEFAULT_VERSION_JSON = Path("release") / "version.json"
+_STABLE_VENDOR = "ClipSync"
 
 _LOAD_HINT = (
     "Enable Developer mode, then click Load unpacked and select the folder "
@@ -44,26 +46,95 @@ def app_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def extension_dir(base: Path | None = None) -> Path:
-    root = Path(base) if base is not None else app_base_dir()
-    return root / EXTENSION_DIRNAME
+def _default_appdata() -> Path:
+    env = os.environ.get("APPDATA")
+    if env:
+        return Path(env)
+    return Path.home() / "AppData" / "Roaming"
+
+
+def stable_extension_dir(*, appdata: Path | str | None = None) -> Path:
+    """Load-unpacked target: %AppData%\\Roaming\\ClipSync\\chrome-extension\\."""
+    root = Path(appdata) if appdata is not None else _default_appdata()
+    return root / _STABLE_VENDOR / EXTENSION_DIRNAME
+
+
+def extension_dir(*, appdata: Path | str | None = None) -> Path:
+    """Path staff should Load unpacked (stable AppData)."""
+    return stable_extension_dir(appdata=appdata)
+
+
+def bundled_extension_dir(base: Path | None = None) -> Path:
+    """Resolve the bundled/source chrome-extension folder (may not exist yet)."""
+    candidates: list[Path] = []
+    if base is not None:
+        candidates.append(Path(base) / EXTENSION_DIRNAME)
+    else:
+        root = app_base_dir()
+        candidates.append(root / EXTENSION_DIRNAME)
+        if getattr(sys, "frozen", False):
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                meipass_path = Path(meipass)
+                candidates.append(meipass_path / EXTENSION_DIRNAME)
+            # PyInstaller 6 onedir datas often live under _internal next to exe.
+            candidates.append(root / "_internal" / EXTENSION_DIRNAME)
+        # Dev / worktree: pc/chrome-extension next to this module.
+        candidates.append(Path(__file__).resolve().parent.parent / EXTENSION_DIRNAME)
+
+    seen: set[Path] = set()
+    preferred: Path | None = None
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if preferred is None:
+            preferred = candidate
+        if (candidate / MANIFEST_NAME).is_file():
+            return candidate
+    return preferred if preferred is not None else Path(base or app_base_dir()) / EXTENSION_DIRNAME
+
+
+def ensure_stable_extension_installed(
+    source: Path | None = None,
+    *,
+    dest: Path | None = None,
+    appdata: Path | str | None = None,
+) -> Path:
+    """Copy bundled extension → stable AppData path (clean overwrite)."""
+    src = Path(source) if source is not None else bundled_extension_dir()
+    if src.name != EXTENSION_DIRNAME and (src / EXTENSION_DIRNAME / MANIFEST_NAME).is_file():
+        src = src / EXTENSION_DIRNAME
+    if not (src / MANIFEST_NAME).is_file():
+        raise FileNotFoundError(
+            f"ไม่พบ chrome-extension ที่จะติดตั้ง (ไม่มี {MANIFEST_NAME}): {src}"
+        )
+
+    target = Path(dest) if dest is not None else stable_extension_dir(appdata=appdata)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(src, target)
+    return target
 
 
 def site_profiles_dir(base: Path | None = None) -> Path:
     """Resolve ``chrome-extension/profiles`` for Push Site Profiles.
 
-    Frozen builds often live in Downloads without a profiles folder next to the
-    exe. Prefer the first existing candidate: beside the app, PyInstaller
-    extract dir, then the source tree next to this module (``pc/``).
+    Prefer the stable AppData install, then beside the app / PyInstaller extract /
+    source tree.
     """
+    candidates: list[Path] = [stable_extension_dir() / "profiles"]
     root = Path(base) if base is not None else app_base_dir()
-    candidates: list[Path] = [root / EXTENSION_DIRNAME / "profiles"]
+    candidates.append(root / EXTENSION_DIRNAME / "profiles")
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             meipass_path = Path(meipass)
             candidates.append(meipass_path / EXTENSION_DIRNAME / "profiles")
             candidates.append(meipass_path / "profiles")
+        candidates.append(root / "_internal" / EXTENSION_DIRNAME / "profiles")
     # clipsync/ext_installer.py -> pc/chrome-extension/profiles (dev / worktree)
     candidates.append(Path(__file__).resolve().parent.parent / EXTENSION_DIRNAME / "profiles")
 
@@ -94,8 +165,8 @@ def local_manifest_version(extension_path: Path | None = None) -> str:
     return version
 
 
-def copy_extension_path(base: Path | None = None) -> str:
-    path = str(extension_dir(base=base).resolve())
+def copy_extension_path(*, appdata: Path | str | None = None) -> str:
+    path = str(extension_dir(appdata=appdata).resolve())
     pyperclip.copy(path)
     return path
 
@@ -124,9 +195,18 @@ def open_chrome_extensions() -> str:
         return fallback_msg
 
 
-def guide_install(base: Path | None = None) -> str:
-    """Copy extension path to clipboard and open Chrome's extensions page."""
-    path = copy_extension_path(base=base)
+def guide_install(
+    *,
+    source: Path | None = None,
+    appdata: Path | str | None = None,
+) -> str:
+    """Ensure stable install, copy path to clipboard, open Chrome extensions page."""
+    try:
+        ensure_stable_extension_installed(source=source, appdata=appdata)
+    except FileNotFoundError:
+        # Still copy the stable path so staff can browse if Setup already placed it.
+        pass
+    path = copy_extension_path(appdata=appdata)
     open_note = open_chrome_extensions()
     return (
         f"Extension path copied to clipboard:\n{path}\n\n{open_note}"

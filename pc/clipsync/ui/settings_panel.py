@@ -79,6 +79,13 @@ def pairing_token_from_config(cfg: Mapping[str, Any]) -> str:
     return str(bridge.get("pairing_token") or "")
 
 
+def extension_install_path_text(*, appdata: Path | str | None = None) -> str:
+    """Full stable path for Load unpacked (never ``_internal``)."""
+    from clipsync.ext_installer import stable_extension_dir
+
+    return str(stable_extension_dir(appdata=appdata).resolve())
+
+
 def copy_text_to_clipboard(text: str, *, root: Any = None) -> None:
     """Copy text to clipboard via pyperclip, with Tk fallback."""
     try:
@@ -106,6 +113,7 @@ class SettingsPanel:
         config_path: Optional[Path | str] = None,
         on_reload: Optional[ReloadCallback] = None,
         on_push_profiles: Optional[Callable[[], None]] = None,
+        on_guide_install: Optional[Callable[[], str]] = None,
         initial_transport: Optional[str] = None,
     ) -> None:
         if ttk is None or tk is None:
@@ -114,6 +122,7 @@ class SettingsPanel:
         self._config_path = Path(config_path) if config_path else default_config_path()
         self._on_reload = on_reload
         self._on_push_profiles = on_push_profiles
+        self._on_guide_install = on_guide_install
         self._transport_name = initial_transport
 
         self.frame = ttk.Frame(parent, padding=12)
@@ -173,6 +182,53 @@ class SettingsPanel:
             row=row, column=0, columnspan=3, sticky="ew", pady=(12, 8)
         )
         row += 1
+        ttk.Label(
+            form,
+            text="ติดตั้ง Chrome extension",
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=row, column=0, columnspan=3, sticky="w")
+        row += 1
+        ttk.Label(
+            form,
+            text=(
+                "ครั้งแรก: กดติดตั้ง → Load unpacked จาก path ด้านล่าง  "
+                "อัปเดตครั้งถัดไป: ติดตั้ง Setup ใหม่แล้วกด Reload ใน Chrome"
+            ),
+            foreground="#667085",
+            wraplength=520,
+        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        row += 1
+        self._ext_path_var = tk.StringVar(value=extension_install_path_text())
+        ttk.Label(form, text="โฟลเดอร์ extension (path เต็ม)", foreground="#344054").grid(
+            row=row, column=0, columnspan=3, sticky="w"
+        )
+        row += 1
+        path_entry = ttk.Entry(
+            form, textvariable=self._ext_path_var, width=56, state="readonly"
+        )
+        path_entry.grid(row=row, column=0, columnspan=2, sticky="we", pady=4)
+        ttk.Button(form, text="คัดลอก path", command=self.copy_extension_install_path).grid(
+            row=row, column=2, sticky="w", padx=(8, 0)
+        )
+        row += 1
+        ext_btns = ttk.Frame(form)
+        ext_btns.grid(row=row, column=0, columnspan=3, sticky="w", pady=(4, 4))
+        ttk.Button(
+            ext_btns,
+            text="ติดตั้ง extension (Load unpacked)",
+            command=self.guide_install_extension,
+        ).pack(side="left")
+        ttk.Button(
+            ext_btns,
+            text="เปิด chrome://extensions",
+            command=self.open_chrome_extensions_page,
+        ).pack(side="left", padx=(8, 0))
+
+        row += 1
+        ttk.Separator(form, orient="horizontal").grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=(12, 8)
+        )
+        row += 1
         ttk.Label(form, text="Chrome extension pairing token", font=("Segoe UI", 10, "bold")).grid(
             row=row, column=0, columnspan=3, sticky="w"
         )
@@ -188,7 +244,7 @@ class SettingsPanel:
         row += 1
         ttk.Label(
             form,
-            text="วาง token นี้ใน popup ของ ClipSync Slip Bridge → Save",
+            text="หลัง Load unpacked แล้ว: วาง token นี้ใน popup ของ ClipSync Slip Bridge → Save",
             foreground="#667085",
         ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
         row += 1
@@ -306,7 +362,56 @@ class SettingsPanel:
         self._ws_port_var.set(
             f"Chrome bridge: ws://127.0.0.1:{port}  (ต้องเปิด ClipSync PC ค้างไว้ก่อนกด Save & connect)"
         )
+        self.refresh_extension_install_path()
         self._status_var.set(f"Loaded {self._config_path}")
+
+    def refresh_extension_install_path(self) -> None:
+        self._ext_path_var.set(extension_install_path_text())
+
+    def copy_extension_install_path(self) -> None:
+        path = extension_install_path_text()
+        self._ext_path_var.set(path)
+        try:
+            copy_text_to_clipboard(path, root=self.frame.winfo_toplevel())
+        except Exception as exc:
+            self._status_var.set(f"Copy path failed: {exc}")
+            if messagebox is not None:
+                messagebox.showerror("Chrome extension", str(exc))
+            return
+        self._status_var.set(f"Copied extension path: {path}")
+
+    def open_chrome_extensions_page(self) -> None:
+        from clipsync.ext_installer import open_chrome_extensions
+
+        note = open_chrome_extensions()
+        self._status_var.set(note)
+        if messagebox is not None:
+            messagebox.showinfo("chrome://extensions", note)
+
+    def guide_install_extension(self) -> None:
+        from clipsync.ext_installer import guide_install
+
+        try:
+            if self._on_guide_install is not None:
+                message = self._on_guide_install()
+            else:
+                message = guide_install()
+            self.refresh_extension_install_path()
+        except Exception as exc:
+            self._status_var.set(f"Install guide failed: {exc}")
+            if messagebox is not None:
+                messagebox.showerror("Chrome extension", str(exc))
+            return
+        self._status_var.set("Extension path copied — Load unpacked ใน Chrome")
+        if messagebox is not None:
+            messagebox.showinfo(
+                "ติดตั้ง Chrome extension",
+                f"{message}\n\n"
+                "1) เปิด Developer mode\n"
+                "2) กด Load unpacked\n"
+                "3) วาง path จากคลิปบอร์ด (หรือ Browse ตาม path ใน Settings)\n"
+                "4) แล้วค่อยวาง pairing token + Push Site Profiles",
+            )
 
     def copy_pairing_token(self) -> None:
         token = (self._pairing_token.get() or "").strip()

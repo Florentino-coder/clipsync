@@ -45,7 +45,7 @@ from clipsync.ui.debug_panel import DebugPanel
 from clipsync.ui.settings_panel import SettingsPanel
 
 APP_NAME = "ClipSync PC"
-APP_VERSION = "0.9.7"
+APP_VERSION = "0.9.8"
 AUTHOR_NAME = "Florentino356"
 DEFAULT_RELAY_URL = "wss://clipsync-relay.onrender.com"
 UPDATE_MANIFEST_URL = (
@@ -509,9 +509,19 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
         self.configure(bg="#f6f8fb")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._load_window_icon()
+        self._sync_stable_extension()
         self._build_ui()
         self.after(350, self._start_sync)
         self.after(500, self._start_slip_stack)
+
+    def _sync_stable_extension(self) -> None:
+        """Copy bundled chrome-extension → %AppData%\\Roaming\\ClipSync\\chrome-extension."""
+        try:
+            from clipsync.ext_installer import ensure_stable_extension_installed
+
+            ensure_stable_extension_installed()
+        except Exception:
+            pass
 
     def _start_slip_stack(self) -> None:
         # Always start chrome bridge + slip stack so the extension can connect
@@ -573,6 +583,7 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
             settings_tab,
             on_reload=self._on_settings_reload,
             on_push_profiles=self.push_site_profiles_to_extension,
+            on_guide_install=self.guide_install_chrome_extension,
         )
 
         audit_tab = ttk.Frame(notebook, style="Card.TFrame")
@@ -806,6 +817,11 @@ class ClipSyncApp(tk.Tk if tk is not None else object):  # type: ignore[misc]
                 "Site Profiles",
                 f"ส่งแล้ว: {ids}\nไปที่ popup extension — ควรเห็น Profiles ≥ 1",
             )
+
+    def guide_install_chrome_extension(self) -> str:
+        from clipsync.ext_installer import guide_install
+
+        return guide_install()
 
     def set_slip_orchestrator(self, orchestrator: Any) -> None:
         """Optional SlipOrchestrator for config hot-reload from Settings."""

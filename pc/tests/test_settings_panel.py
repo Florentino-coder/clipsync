@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from clipsync.config import default_config
 from clipsync.ui.settings_panel import (
     SettingsFormValues,
     apply_form_values,
+    extension_install_path_text,
     form_values_from_config,
     pairing_token_from_config,
     transport_indicator,
@@ -87,3 +90,12 @@ def test_pairing_token_from_config():
     assert pairing_token_from_config(cfg) == "abc123deadbeef00abc123deadbeef00"
     assert pairing_token_from_config({}) == ""
     assert pairing_token_from_config({"chrome_bridge": {}}) == ""
+
+
+def test_extension_install_path_text_is_full_stable_path(tmp_path: Path):
+    path = extension_install_path_text(appdata=tmp_path)
+    expected = str((tmp_path / "ClipSync" / "chrome-extension").resolve())
+    assert path == expected
+    assert "ClipSync" in path
+    assert "chrome-extension" in path
+    assert "_internal" not in path
