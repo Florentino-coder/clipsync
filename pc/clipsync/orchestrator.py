@@ -68,23 +68,40 @@ def _normalize_order(order: Mapping[str, Any]) -> dict[str, Any]:
     order_id_s = str(order_id).strip() if order_id is not None else ""
     if not is_reliable_order_id(order_id_s):
         order_id_s = ""
+
+    acct_raw = order.get("member_bank_account") or order.get("account") or ""
+    acct_digits = "".join(ch for ch in str(acct_raw) if ch.isdigit())
+
     last4 = order.get("account_last4")
     if last4 is None:
         last4 = order.get("accountLast4")
     if last4 is None:
-        acct = order.get("member_bank_account") or order.get("account") or ""
-        digits = "".join(ch for ch in str(acct) if ch.isdigit())
-        last4 = digits[-4:] if len(digits) >= 4 else ""
+        last4 = acct_digits[-4:] if len(acct_digits) >= 4 else ""
     else:
         digits = "".join(ch for ch in str(last4) if ch.isdigit())
         last4 = digits[-4:] if digits else ""
+
+    # Prefer full digits from scrape; never invent digits beyond what scrape gave.
+    account_full = acct_digits
+    if not account_full and last4:
+        account_full = str(last4)  # last-4 only — copy-account will be weak; do not pad
+
     bank = order.get("bank")
     if bank is None:
         bank = order.get("bank_name") or order.get("bank_name_th") or order.get("member_bank")
+
+    name = order.get("account_name")
+    if name is None:
+        name = order.get("name") or order.get("username") or order.get("member_name") or ""
+
+    amount = order.get("amount")
+
     return {
         "order_id": order_id_s,
-        "amount": order.get("amount"),
+        "amount": amount,
+        "account": account_full,
         "account_last4": str(last4) if last4 else "",
+        "account_name": str(name).strip() if name is not None else "",
         "bank": str(bank).strip() if bank is not None and str(bank).strip() else "",
     }
 

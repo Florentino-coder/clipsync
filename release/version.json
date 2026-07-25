@@ -3,11 +3,11 @@
   "released_at": "2026-07-25",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.9",
+    "version": "0.9.10",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Settings: scrollable body + sticky Save/Reload footer; grouped sections; 2-column layout when wide. Fixes content overflow on large/high-DPI monitors."
+    "notes": "Pending-order normalize keeps full account digits + account_name (withdraw notify copy) while retaining account_last4 for matcher."
   },
   "android": {
     "version": "0.9.5+26",
