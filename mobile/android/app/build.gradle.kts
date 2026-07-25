@@ -1,11 +1,11 @@
-// ClipSync Android app Gradle. CI copies this over the flutter-create default
-// in .github/workflows/build-apk.yml, then rewrites applicationId for the test APK.
-// Includes core library desugaring required by flutter_local_notifications.
+// ClipSync Android app Gradle reference (AGP 9 / built-in Kotlin).
+// CI does NOT overwrite flutter create's generated file with this —
+// it only patches desugaring + multiDex into mobile_build (see build-apk.yml).
+// Kept here so local/android snippets stay aligned with what CI enables.
 
 plugins {
     id("com.android.application")
-    id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // The Flutter Gradle Plugin must be applied after the Android Gradle plugin.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -20,10 +20,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
-    }
-
     defaultConfig {
         applicationId = "com.clipsync.mobile_build"
         multiDexEnabled = true
@@ -35,8 +31,16 @@ android {
 
     buildTypes {
         release {
+            // TODO: Add your own signing config for the release build.
+            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 

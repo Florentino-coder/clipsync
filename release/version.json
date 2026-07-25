@@ -10,10 +10,10 @@
     "notes": "Emit typed withdraw_notify to relay for newly scraped pending orders (full account + amount)."
   },
   "android": {
-    "version": "0.9.8+30",
+    "version": "0.9.8+31",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "CI fix: copy assets/banks into mobile_build + enable core library desugaring for flutter_local_notifications."
+    "notes": "CI: patch desugaring into flutter-create Gradle instead of overwriting AGP9-incompatible build.gradle.kts."
   },
   "extension": {
     "version": "1.0.38",

@@ -100,16 +100,14 @@ jobs:
           if [ -d mobile/android/app/src/main/res ]; then
             cp -R mobile/android/app/src/main/res/* mobile_build/android/app/src/main/res/
           fi
-          # Prefer committed app Gradle (desugaring + multiDex) over flutter create defaults
-          if [ -f mobile/android/app/build.gradle.kts ]; then
-            cp mobile/android/app/build.gradle.kts mobile_build/android/app/build.gradle.kts
-          fi
+          # Keep flutter create's AGP-compatible app Gradle (do NOT overwrite with a
+          # committed template — that previously reintroduced AGP 9 kotlinOptions /
+          # kotlin-android errors and broke the release-signing string replace).
           perl -0pi -e 's/^\s*ndkVersion\s*=\s*flutter\.ndkVersion\s*\n//mg' mobile_build/android/app/build.gradle.kts
           # Isolate from production install: different applicationId + test keystore
           perl -0pi -e 's/applicationId\s*=\s*"com\.clipsync\.mobile_build"/applicationId = "com.clipsync.mobile_build.test"/' \
             mobile_build/android/app/build.gradle.kts
           # flutter_local_notifications requires core library desugaring on :app
-          # (idempotent if already present in committed build.gradle.kts)
           python3 - <<'PY'
           from pathlib import Path
 
