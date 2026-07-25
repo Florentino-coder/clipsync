@@ -10,10 +10,10 @@
     "notes": "Emit typed withdraw_notify to relay for newly scraped pending orders (full account + amount)."
   },
   "android": {
-    "version": "0.9.8+29",
+    "version": "0.9.8+30",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "Phase A ship: withdraw inbox UI + notify/copy/logos (newest-first, bank logos, per-row copy)."
+    "notes": "CI fix: copy assets/banks into mobile_build + enable core library desugaring for flutter_local_notifications."
   },
   "extension": {
     "version": "1.0.38",

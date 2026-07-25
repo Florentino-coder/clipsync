@@ -85,6 +85,10 @@ jobs:
           cp mobile/pubspec.yaml mobile_build/pubspec.yaml
           rm -rf mobile_build/lib
           cp -R mobile/lib mobile_build/lib
+          # pubspec declares assets/banks/ — must exist under mobile_build for flutter pub get
+          rm -rf mobile_build/assets
+          cp -R mobile/assets mobile_build/assets
+          test -d mobile_build/assets/banks
           cp mobile/android/app/src/main/AndroidManifest.xml mobile_build/android/app/src/main/AndroidManifest.xml
           mkdir -p mobile_build/android/app/src/main/kotlin/com/clipsync/mobile_build
           # Explicit MainActivity + full kotlin tree (SlipObserverPlugin, etc.)
@@ -96,10 +100,52 @@ jobs:
           if [ -d mobile/android/app/src/main/res ]; then
             cp -R mobile/android/app/src/main/res/* mobile_build/android/app/src/main/res/
           fi
+          # Prefer committed app Gradle (desugaring + multiDex) over flutter create defaults
+          if [ -f mobile/android/app/build.gradle.kts ]; then
+            cp mobile/android/app/build.gradle.kts mobile_build/android/app/build.gradle.kts
+          fi
           perl -0pi -e 's/^\s*ndkVersion\s*=\s*flutter\.ndkVersion\s*\n//mg' mobile_build/android/app/build.gradle.kts
           # Isolate from production install: different applicationId + test keystore
           perl -0pi -e 's/applicationId\s*=\s*"com\.clipsync\.mobile_build"/applicationId = "com.clipsync.mobile_build.test"/' \
             mobile_build/android/app/build.gradle.kts
+          # flutter_local_notifications requires core library desugaring on :app
+          # (idempotent if already present in committed build.gradle.kts)
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("mobile_build/android/app/build.gradle.kts")
+          text = path.read_text()
+          if "isCoreLibraryDesugaringEnabled" not in text:
+              text = text.replace(
+                  "    compileOptions {\n",
+                  "    compileOptions {\n"
+                  "        isCoreLibraryDesugaringEnabled = true\n",
+                  1,
+              )
+          if "multiDexEnabled" not in text:
+              text = text.replace(
+                  "    defaultConfig {\n",
+                  "    defaultConfig {\n"
+                  "        multiDexEnabled = true\n",
+                  1,
+              )
+          if "desugar_jdk_libs" not in text:
+              dep = (
+                  "\ndependencies {\n"
+                  '    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n'
+                  "}\n"
+              )
+              if "dependencies {" in text:
+                  text = text.replace(
+                      "dependencies {\n",
+                      "dependencies {\n"
+                      '    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n',
+                      1,
+                  )
+              else:
+                  text = text.rstrip() + "\n" + dep
+          path.write_text(text)
+          PY
           cat > mobile_build/android/app/proguard-rules.pro <<'EOF'
           # Flutter runtime and plugin entry points.
           -keep class io.flutter.** { *; }
