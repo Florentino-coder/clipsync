@@ -27,8 +27,15 @@ bool shouldHeadsUp({
 
 typedef CopyHandler = Future<void> Function(String actionId, String text);
 
+/// Called when user taps the withdraw notification body (not a copy action).
+/// [orderId] comes from notification payload when available.
+typedef OpenInboxHandler = void Function(String? orderId);
+
 /// Injectable queue accessor for notification copy actions.
 WithdrawQueue Function()? withdrawQueueProvider;
+
+/// Open-inbox handler registered by the main UI (HomeScreen).
+OpenInboxHandler? onOpenWithdrawInbox;
 
 /// Local notifications for pending withdraw orders (HIGH channel, separate from FGS).
 class WithdrawNotifyService {
@@ -185,6 +192,7 @@ class WithdrawNotifyService {
         'รายการถอนรอโอน · ${pending.length} รายการ',
         'แตะเพื่อดูรายการ',
         NotificationDetails(android: summaryAndroid),
+        payload: active.orderId,
       );
     } else {
       await _plugin.cancel(kWithdrawSummaryNotifyId);
@@ -197,7 +205,30 @@ class WithdrawNotifyService {
 
   Future<void> _handleAction(NotificationResponse response) async {
     final actionId = response.actionId;
-    if (actionId == null) return;
+    final payload = response.payload;
+
+    // Body tap (no action) → set active from payload + open inbox.
+    if (actionId == null || actionId.isEmpty) {
+      final q = withdrawQueueProvider?.call();
+      final orderId = (payload ?? '').trim();
+      if (q != null && orderId.isNotEmpty) {
+        q.setActive(orderId);
+        try {
+          await syncFromQueue(q, allowHeadsUp: false);
+        } catch (_) {}
+      }
+      final open = onOpenWithdrawInbox;
+      if (open != null) {
+        open(orderId.isEmpty ? null : orderId);
+      } else {
+        FlutterForegroundTask.sendDataToMain({
+          'type': 'open_withdraw_inbox',
+          if (orderId.isNotEmpty) 'order_id': orderId,
+        });
+      }
+      return;
+    }
+
     if (actionId != kCopyAmountActionId && actionId != kCopyAccountActionId) {
       return;
     }
@@ -221,6 +252,19 @@ class WithdrawNotifyService {
       'action': actionId,
       'text': text,
     });
+  }
+
+  /// If the app was launched by tapping a withdraw notification, open inbox.
+  Future<void> handleLaunchDetails() async {
+    await init();
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details?.didNotificationLaunchApp != true) return;
+    final response = details!.notificationResponse;
+    if (response == null) return;
+    // Only body taps open inbox (copy actions already handled separately).
+    final actionId = response.actionId;
+    if (actionId != null && actionId.isNotEmpty) return;
+    await _handleAction(response);
   }
 }
 

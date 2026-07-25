@@ -10,10 +10,10 @@
     "notes": "Emit typed withdraw_notify to relay for newly scraped pending orders (full account + amount)."
   },
   "android": {
-    "version": "0.9.7+28",
+    "version": "0.9.8+29",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "Phase A withdraw notify + copy amount/account actions + bank logos (local HIGH channel)."
+    "notes": "Phase A ship: withdraw inbox UI + notify/copy/logos (newest-first, bank logos, per-row copy)."
   },
   "extension": {
     "version": "1.0.38",

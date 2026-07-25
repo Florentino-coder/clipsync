@@ -17,6 +17,7 @@ import 'license/license_gate.dart';
 import 'license/license_service.dart';
 import 'slip/slip_bootstrap.dart';
 import 'update_service.dart';
+import 'withdraw/withdraw_inbox_page.dart';
 import 'withdraw/withdraw_notify_service.dart';
 import 'withdraw/withdraw_queue.dart';
 import 'withdraw/withdraw_ws.dart';
@@ -53,7 +54,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     withdrawQueueProvider = () => _withdrawQueue;
+    onOpenWithdrawInbox = (_) {
+      if (!mounted) return;
+      unawaited(_openWithdrawInbox());
+    };
     unawaited(WithdrawNotifyService.instance.init());
+    unawaited(WithdrawNotifyService.instance.handleLaunchDetails());
     _loadSaved();
     unawaited(_checkUpdate());
     FlutterForegroundTask.addTaskDataCallback(_onData);
@@ -61,6 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    onOpenWithdrawInbox = null;
     FlutterForegroundTask.removeTaskDataCallback(_onData);
     unawaited(_stopSlipStack());
     _fallbackRetryTimer?.cancel();
@@ -265,6 +272,12 @@ class _HomeScreenState extends State<HomeScreen> {
           SnackBar(content: Text('$label: $text'), duration: const Duration(seconds: 2)),
         );
       }
+    } else if (type == 'open_withdraw_inbox') {
+      final orderId = (msg['order_id'] as String? ?? '').trim();
+      if (orderId.isNotEmpty) {
+        _withdrawQueue.setActive(orderId);
+      }
+      unawaited(_openWithdrawInbox());
     } else if (type == 'status') {
       final online = msg['online'] == true;
       setState(() {
@@ -630,6 +643,38 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Future<void> _openWithdrawInbox() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WithdrawInboxPage(
+          queue: _withdrawQueue,
+          onActiveChanged: (order) async {
+            setState(() {});
+            await WithdrawNotifyService.instance.syncFromQueue(
+              _withdrawQueue,
+              allowHeadsUp: false,
+            );
+            _addEvent('Active withdraw ${order.orderId}');
+          },
+          onCopied: (label, text) {
+            _addEvent(
+              '$label ${text.length > 12 ? text.substring(text.length - 4) : text}',
+            );
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('$label: $text'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   Future<void> _copyClipFromService(String text) async {
     if (text.isEmpty) return;
     try {
@@ -933,6 +978,29 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 value: _slipEnabled,
                 onChanged: _busy ? null : _setSlipEnabled,
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: () => unawaited(_openWithdrawInbox()),
+                  icon: Badge(
+                    isLabelVisible: _withdrawQueue.pending.isNotEmpty,
+                    label: Text('${_withdrawQueue.pending.length}'),
+                    child: const Icon(Icons.account_balance_wallet_outlined),
+                  ),
+                  label: Text(
+                    _withdrawQueue.pending.isEmpty
+                        ? 'รายการถอนรอโอน'
+                        : 'รายการถอนรอโอน (${_withdrawQueue.pending.length})',
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 28),
               if (_lastClip.isNotEmpty) ...[
