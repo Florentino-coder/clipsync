@@ -111,6 +111,7 @@ def test_settings_use_two_columns_threshold():
 
 
 def test_settings_panel_scrollable_body_and_sticky_footer(tmp_path: Path):
+    """Layout smoke test — needs a real Tk display; skip on headless CI."""
     tk = pytest.importorskip("tkinter")
     ttk = pytest.importorskip("tkinter.ttk")
     from clipsync.ui.settings_panel import SettingsPanel
@@ -118,7 +119,11 @@ def test_settings_panel_scrollable_body_and_sticky_footer(tmp_path: Path):
     cfg_path = tmp_path / "clipsync-config.json"
     save_config(default_config(), path=cfg_path)
 
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        # ubuntu-latest CI has no $DISPLAY; pure-logic tests above still run.
+        pytest.skip(f"Tk display unavailable (headless CI): {exc}")
     root.withdraw()
     root.geometry("640x420")
     try:
