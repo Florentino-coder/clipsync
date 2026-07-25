@@ -475,3 +475,48 @@ async def test_auto_confirm_amount_only_when_pending_orders_empty(tmp_path: Path
     assert call.args[0] == "350.00"
     assert isinstance(call.kwargs.get("slip"), dict)
     assert result["decision"] == "auto_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_auto_confirm_when_ocr_confidence_is_zero_unknown(tmp_path: Path):
+    """Production: ML Kit sends ocr_confidence=0.0 → must still auto-confirm.
+
+    Audit showed order_id '' (amount_only match) + pending_review for 2900 while
+    manual ยืนยันเอง succeeded — confidence gate was treating 0.0 as < 0.90.
+    """
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+    # Empty scrape → amount_only path (matches live Jinbao when scrape misses).
+
+    event = {
+        **EVENT,
+        "event_id": "evt-2900",
+        "amount": 2900.0,
+        "receiver_account_last4": "0171",
+        "sender_account_last4": "7476",
+        "ocr_confidence": 0.0,
+        "ref_number": None,
+    }
+
+    async def _reply() -> None:
+        await asyncio.sleep(0.02)
+        orch.on_confirm_result(
+            {
+                "type": "confirm_result",
+                "orderId": "2900.00",
+                "matchKey": "2900.00",
+                "ok": True,
+                "verified": True,
+                "reason": None,
+            }
+        )
+
+    t = asyncio.create_task(_reply())
+    result = await orch.handle_slip_event(event, source="usb")
+    await t
+
+    bridge.push_confirm_order.assert_awaited_once()
+    assert result["decision"] == "auto_confirmed"
+    audits = _audit_lines(tmp_path / "audit.jsonl")
+    assert any(a.get("decision") == "auto_confirmed" for a in audits)

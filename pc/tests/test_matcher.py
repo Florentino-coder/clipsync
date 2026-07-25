@@ -336,6 +336,23 @@ def test_missing_ocr_confidence_still_auto_confirms_when_enabled():
     assert should_auto_confirm(ocr, matched, CFG) is True
 
 
+def test_zero_ocr_confidence_treated_as_unknown_still_auto_confirms():
+    """ML Kit often reports no element.confidence → mobile sends 0.0 (unknown).
+
+    Treating 0.0 as a real score below min_ocr_confidence (0.90) blocked every
+    auto-confirm while manual ยืนยันเอง still worked (no confidence gate).
+    """
+    matched = match_order(OCR, ORDERS, CFG, used_refs=set())
+    ocr = {**OCR, "ocr_confidence": 0.0}
+    assert should_auto_confirm(ocr, matched, CFG) is True
+
+
+def test_low_but_nonzero_ocr_confidence_still_blocks():
+    matched = match_order(OCR, ORDERS, CFG, used_refs=set())
+    ocr = {**OCR, "ocr_confidence": 0.5}
+    assert should_auto_confirm(ocr, matched, CFG) is False
+
+
 def test_resolve_auto_match_amount_only_when_scrape_empty():
     from clipsync.matcher import resolve_auto_match
 

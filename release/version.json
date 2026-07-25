@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "released_at": "2026-07-24",
+  "released_at": "2026-07-25",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.4",
+    "version": "0.9.5",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Reject scrape order_id like '1'; require payer last4 before confirm push."
+    "notes": "Treat ML Kit ocr_confidence 0.0 as unknown so auto-confirm fires (manual path already worked)."
   },
   "android": {
     "version": "0.9.3+24",

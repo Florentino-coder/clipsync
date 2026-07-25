@@ -247,10 +247,14 @@ def should_auto_confirm(
     confidence_raw = ocr.get("ocr_confidence")
     if confidence_raw is not None and str(confidence_raw).strip() != "":
         confidence = float(confidence_raw)
-        min_conf = float(ac.get("min_ocr_confidence") or 0.0)
-        if confidence < min_conf:
-            return False
-    # Missing confidence: allow when master switch is on (older payloads).
+        # 0.0 means "unknown" from mobile (ML Kit often omits element.confidence).
+        # Do not treat it as a real score below min_ocr_confidence — that blocked
+        # every auto-confirm while manual ยืนยันเอง still worked.
+        if confidence > 0.0:
+            min_conf = float(ac.get("min_ocr_confidence") or 0.0)
+            if confidence < min_conf:
+                return False
+    # Missing / unknown (0.0) confidence: allow when master switch is on.
 
     review = ac.get("require_manual_review") or {}
     if review.get("enabled", False):
