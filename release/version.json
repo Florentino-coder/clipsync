@@ -3,11 +3,11 @@
   "released_at": "2026-07-25",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.11",
+    "version": "0.9.12",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Emit typed withdraw_notify to relay for newly scraped pending orders (full account + amount)."
+    "notes": "Activity log: Pending scrape N/new + WDRAW emit/skip reasons (wrong Jinbao tab visibility)."
   },
   "android": {
     "version": "0.9.8+31",

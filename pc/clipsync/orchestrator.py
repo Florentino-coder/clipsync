@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, MutableMapping, Optional
 
@@ -29,6 +30,7 @@ CONFIRM_TIMEOUT_DEFAULT = 60.0
 
 SendAckCallback = Callable[[str], Awaitable[None] | None]
 SendWithdrawNotifyCallback = Callable[[dict[str, Any]], None]
+ActivityLogCallback = Callable[[str], None]
 
 
 def default_used_refs_path() -> Path:
@@ -123,6 +125,7 @@ class SlipOrchestrator:
         confirm_timeout: float = CONFIRM_TIMEOUT_DEFAULT,
         send_ack: Optional[SendAckCallback] = None,
         send_withdraw_notify: Optional[SendWithdrawNotifyCallback] = None,
+        activity_log: Optional[ActivityLogCallback] = None,
         seen_events: Optional[SeenEvents] = None,
     ) -> None:
         self._cfg: MutableMapping[str, Any] = dict(cfg)
@@ -135,6 +138,7 @@ class SlipOrchestrator:
         self._confirm_timeout = float(confirm_timeout)
         self._send_ack = send_ack
         self._send_withdraw_notify = send_withdraw_notify
+        self._activity_log = activity_log
 
         if seen_events is not None:
             self._seen = seen_events
@@ -149,6 +153,8 @@ class SlipOrchestrator:
         self._used_refs: set[str] = load_used_refs(self._used_refs_path)
         self._pending_orders: list[dict[str, Any]] = []
         self._confirm_waiters: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._last_scrape_log = ""
+        self._last_scrape_log_at = 0.0
 
     def update_config(self, cfg: Mapping[str, Any]) -> None:
         self._cfg = dict(cfg)
@@ -175,24 +181,53 @@ class SlipOrchestrator:
                 _normalize_order(o) for o in orders if isinstance(o, Mapping)
             ]
             newly = new_orders_since(self._pending_orders, normalized)
+            source = str(data.get("source") or "dom").strip() or "dom"
+            scrape_msg = (
+                f"Pending scrape: {len(normalized)} order(s), "
+                f"{len(newly)} new ({source})"
+            )
+            now = time.monotonic()
+            # MutationObserver can republish every ~2s; avoid identical spam.
+            if (
+                newly
+                or scrape_msg != self._last_scrape_log
+                or now - self._last_scrape_log_at >= 30.0
+            ):
+                self._log_activity(scrape_msg)
+                self._last_scrape_log = scrape_msg
+                self._last_scrape_log_at = now
             self._pending_orders = normalized
             self._emit_withdraw_notifies(newly)
         except Exception:
             logger.exception("on_pending_orders failed")
 
+    def _log_activity(self, message: str) -> None:
+        log = self._activity_log
+        if log is None:
+            return
+        try:
+            log(message)
+        except Exception:
+            logger.exception("activity_log failed")
+
     def _emit_withdraw_notifies(self, orders: list[dict[str, Any]]) -> None:
         send = self._send_withdraw_notify
         if send is None:
+            if orders:
+                self._log_activity(
+                    f"WDRAW skip: emit not wired ({len(orders)} new order(s))"
+                )
             return
         for order in orders:
             order_id = str(order.get("order_id") or "").strip()
             account = str(order.get("account") or "").strip()
             if not order_id or not account:
-                logger.info(
-                    "skip withdraw_notify: empty order_id or account (id=%r account=%r)",
-                    order_id,
-                    account,
+                msg = (
+                    f"WDRAW skip: empty order_id/account "
+                    f"(id={order_id or '-'} account={account or '-'})"
                 )
+                logger.info(msg)
+                self._log_activity(msg)
                 continue
             try:
                 payload = build_withdraw_notify_payload(order)
@@ -201,6 +236,7 @@ class SlipOrchestrator:
                 logger.exception(
                     "send_withdraw_notify failed for order_id=%s", order_id
                 )
+                self._log_activity(f"WDRAW skip: send failed order={order_id}")
 
     def on_confirm_result(self, data: Mapping[str, Any] | None) -> None:
         """Chrome-bridge callback — must never raise (keeps WS alive)."""

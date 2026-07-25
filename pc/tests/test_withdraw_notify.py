@@ -92,6 +92,7 @@ def test_build_withdraw_notify_payload_fields():
 
 def test_on_pending_orders_emits_only_new(monkeypatch):
     sent: list[dict] = []
+    logs: list[str] = []
 
     def fake_emit(payload: dict) -> None:
         sent.append(payload)
@@ -105,6 +106,7 @@ def test_on_pending_orders_emits_only_new(monkeypatch):
         chrome_bridge=MagicMock(),
         shared_secret="x" * 32,
         send_withdraw_notify=fake_emit,
+        activity_log=logs.append,
     )
     # order_id must be >=4 chars (is_reliable_order_id); plan's "A"/"B" are rejected.
     orch.on_pending_orders(
@@ -122,3 +124,25 @@ def test_on_pending_orders_emits_only_new(monkeypatch):
     assert sent[0]["order_id"] == "ORD-A"
     assert sent[1]["order_id"] == "ORD-B"
     assert sent[1]["account"] == "4444555566"
+    assert any("Pending scrape: 1 order(s), 1 new" in m for m in logs)
+    assert any("Pending scrape: 2 order(s), 1 new" in m for m in logs)
+
+
+def test_on_pending_orders_logs_skip_empty_account():
+    logs: list[str] = []
+    orch = SlipOrchestrator(
+        {
+            "auto_confirm": {"enabled": True, "min_ocr_confidence": 0.9,
+                             "require_manual_review": {"enabled": False, "amount_threshold": 99999}},
+            "matching": {"require_account_last4_match": True, "prevent_duplicate_ref_number": True},
+        },
+        chrome_bridge=MagicMock(),
+        shared_secret="x" * 32,
+        send_withdraw_notify=lambda _p: None,
+        activity_log=logs.append,
+    )
+    orch.on_pending_orders(
+        {"source": "dom", "orders": [{"order_id": "ORD-Z", "amount": 10, "account": ""}]}
+    )
+    assert any("Pending scrape: 1 order(s), 1 new" in m for m in logs)
+    assert any("WDRAW skip: empty order_id/account" in m for m in logs)

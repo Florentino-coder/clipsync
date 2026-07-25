@@ -106,6 +106,7 @@ class SlipBootstrap:
             chrome_bridge=self._bridge,
             shared_secret=self._shared_secret,
             send_withdraw_notify=self._emit_withdraw_notify,
+            activity_log=self._app_log,
         )
 
         self._manager = TransportManager(
@@ -203,18 +204,30 @@ class SlipBootstrap:
 
     def _emit_withdraw_notify(self, payload: dict[str, Any]) -> None:
         """Schedule withdraw_notify on the ClipSyncClient WS loop (bridge thread-safe)."""
+        order_id = str((payload or {}).get("order_id") or "").strip() or "-"
+        amount = str((payload or {}).get("amount") or "").strip() or "-"
         schedule = getattr(self._client, "schedule_withdraw_notify", None)
         if callable(schedule):
+            ws = getattr(self._client, "ws", None)
+            loop = getattr(self._client, "loop", None)
+            if not ws or not loop:
+                self._app_log(f"WDRAW skip {order_id}: no relay WS")
+                return
             schedule(payload)
+            self._app_log(f"WDRAW emit {order_id} amount={amount}")
             return
         send = getattr(self._client, "send_withdraw_notify", None)
         if send is None:
+            self._app_log(f"WDRAW skip {order_id}: send not available")
             return
         loop = getattr(self._client, "loop", None)
         if loop is not None and loop.is_running():
             result = send(payload)
             if asyncio.iscoroutine(result):
                 asyncio.run_coroutine_threadsafe(result, loop)
+            self._app_log(f"WDRAW emit {order_id} amount={amount}")
+        else:
+            self._app_log(f"WDRAW skip {order_id}: client loop not running")
 
     def _on_confirm_result(self, data: dict[str, Any]) -> None:
         reason = data.get("reason")
