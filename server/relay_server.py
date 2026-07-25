@@ -296,6 +296,52 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                     text[:50],
                 )
 
+            # PC → phones: pending withdraw notify (typed; do not use clip).
+            elif action == "withdraw_notify":
+                if not peer_id:
+                    continue
+
+                order_id = msg.get("order_id")
+                if not order_id or not isinstance(order_id, str) or not order_id.strip():
+                    continue
+
+                amount = msg.get("amount", "")
+                account = msg.get("account", "")
+                bank = msg.get("bank", "")
+                account_name = msg.get("account_name", msg.get("name", ""))
+                ts = msg.get("ts", 0)
+                try:
+                    ts_i = int(ts)
+                except (TypeError, ValueError):
+                    ts_i = 0
+
+                payload = json.dumps(
+                    {
+                        "type": "withdraw_notify",
+                        "order_id": order_id.strip(),
+                        "amount": str(amount) if amount is not None else "",
+                        "account": str(account) if account is not None else "",
+                        "bank": str(bank) if bank is not None else "",
+                        "account_name": str(account_name) if account_name is not None else "",
+                        "ts": ts_i,
+                    },
+                    ensure_ascii=False,
+                )
+
+                dead: set[Ws] = set()
+                for ph in list(phones.get(peer_id, set())):
+                    try:
+                        await ph.send_str(payload)
+                    except Exception:
+                        dead.add(ph)
+                phones[peer_id] -= dead
+                log.info(
+                    "WDRAW %s -> %s phone(s) order=%s",
+                    fmt(peer_id),
+                    len(phones.get(peer_id, set())),
+                    order_id.strip()[:40],
+                )
+
     finally:
         await unregister(ws)
 
