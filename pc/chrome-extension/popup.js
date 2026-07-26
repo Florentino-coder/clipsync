@@ -14,6 +14,9 @@ const savePollBtn = document.getElementById('savePoll');
 const searchSecondsEl = document.getElementById('searchSeconds');
 const searchPresetsEl = document.getElementById('searchPresets');
 const saveSearchPollBtn = document.getElementById('saveSearchPoll');
+const saveScrapeFlashEl = document.getElementById('saveScrapeFlash');
+const saveSearchFlashEl = document.getElementById('saveSearchFlash');
+const searchBtnStatusEl = document.getElementById('searchBtnStatus');
 
 const clampPendingOrdersPollMs =
   typeof ClipSyncPollSettings !== 'undefined'
@@ -33,6 +36,26 @@ const clampApprovedSearchPollMs =
         return Math.min(300000, Math.max(10000, Math.round(n)));
       };
 
+const formatApprovedSearchStatusLine =
+  typeof ClipSyncPollSettings !== 'undefined' &&
+  typeof ClipSyncPollSettings.formatApprovedSearchStatusLine === 'function'
+    ? ClipSyncPollSettings.formatApprovedSearchStatusLine
+    : (status) => {
+        if (!status || status.found == null) {
+          return {
+            text: 'สถานะปุ่มค้นหา: ⏳ เปิดแท็บ Jinbao รายการที่อนุมัติแล้ว…',
+            tone: 'muted',
+          };
+        }
+        if (status.found) {
+          return {
+            text: `สถานะปุ่มค้นหา: ✅ เจอแล้ว${status.detail ? ` (${status.detail})` : ''}`,
+            tone: 'ok',
+          };
+        }
+        return { text: 'สถานะปุ่มค้นหา: ❌ ไม่เจอปุ่มค้นหา', tone: 'bad' };
+      };
+
 const DEFAULT_POLL_MS =
   (typeof ClipSyncPollSettings !== 'undefined' &&
     ClipSyncPollSettings.DEFAULT_SCRAPE_POLL_MS) ||
@@ -42,8 +65,20 @@ const DEFAULT_SEARCH_POLL_MS =
     ClipSyncPollSettings.DEFAULT_APPROVED_SEARCH_POLL_MS) ||
   30000;
 
+let scrapeFlashTimer = null;
+let searchFlashTimer = null;
+
 function msToSeconds(ms, clampFn) {
   return Math.round(clampFn(ms) / 1000);
+}
+
+function showFlash(el, text, timerRef) {
+  if (!el) return null;
+  el.textContent = text;
+  if (timerRef) clearTimeout(timerRef);
+  return setTimeout(() => {
+    el.textContent = '';
+  }, 3000);
 }
 
 function renderPollSettings(pendingOrdersPollMs) {
@@ -60,19 +95,54 @@ function renderSearchSettings(approvedSearchPollMs) {
   );
 }
 
+function renderSearchBtnStatus(status) {
+  if (!searchBtnStatusEl) return;
+  const line = formatApprovedSearchStatusLine(status);
+  searchBtnStatusEl.textContent = line.text;
+  searchBtnStatusEl.dataset.tone = line.tone || 'muted';
+}
+
+function requestFreshSearchStatus() {
+  try {
+    chrome.runtime.sendMessage({ type: 'get_approved_search_status' }, (resp) => {
+      void chrome.runtime.lastError;
+      if (resp && resp.status) renderSearchBtnStatus(resp.status);
+    });
+  } catch (_) {
+    /* ignore */
+  }
+}
+
 function savePollSettings() {
   const sec = Number(pollSecondsEl.value);
   const ms = clampPendingOrdersPollMs(sec * 1000);
+  const shownSec = msToSeconds(ms, clampPendingOrdersPollMs);
   chrome.storage.local.set({ pendingOrdersPollMs: ms }, () => {
     renderPollSettings(ms);
+    scrapeFlashTimer = showFlash(
+      saveScrapeFlashEl,
+      `✓ บันทึกแล้ว (${shownSec}s)`,
+      scrapeFlashTimer
+    );
   });
 }
 
 function saveSearchSettings() {
   const sec = Number(searchSecondsEl.value);
   const ms = clampApprovedSearchPollMs(sec * 1000);
+  const shownSec = msToSeconds(ms, clampApprovedSearchPollMs);
   chrome.storage.local.set({ approvedSearchPollMs: ms }, () => {
     renderSearchSettings(ms);
+    searchFlashTimer = showFlash(
+      saveSearchFlashEl,
+      `✓ บันทึกแล้ว (${shownSec}s)`,
+      searchFlashTimer
+    );
+    try {
+      window.alert(`บันทึกแล้ว: รีเฟรชหน้าทุก ${shownSec} วินาที`);
+    } catch (_) {
+      /* ignore */
+    }
   });
 }
 
@@ -134,6 +204,7 @@ function refresh() {
       'siteProfiles',
       'pendingOrdersPollMs',
       'approvedSearchPollMs',
+      'approvedSearchStatus',
     ],
     (data) => {
       if (data.pairingToken) tokenEl.value = data.pairingToken;
@@ -147,6 +218,8 @@ function refresh() {
           ? data.approvedSearchPollMs
           : DEFAULT_SEARCH_POLL_MS
       );
+      renderSearchBtnStatus(data.approvedSearchStatus || null);
+      requestFreshSearchStatus();
     }
   );
 }
@@ -195,6 +268,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes.approvedSearchPollMs) {
     renderSearchSettings(changes.approvedSearchPollMs.newValue);
+  }
+  if (changes.approvedSearchStatus) {
+    renderSearchBtnStatus(changes.approvedSearchStatus.newValue || null);
   }
 });
 

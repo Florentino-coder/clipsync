@@ -29,9 +29,55 @@
     return clampPollMs(value, fallback);
   }
 
+  /**
+   * Popup line for chrome.storage.local.approvedSearchStatus.
+   */
+  function formatApprovedSearchStatusLine(status) {
+    if (!status || typeof status !== 'object') {
+      return {
+        text: 'สถานะปุ่มค้นหา: ⏳ เปิดแท็บ Jinbao รายการที่อนุมัติแล้ว…',
+        tone: 'muted',
+      };
+    }
+    let head;
+    let tone = 'muted';
+    if (status.found === true) {
+      const label = status.detail ? ` (${status.detail})` : '';
+      head = `สถานะปุ่มค้นหา: ✅ เจอแล้ว${label}`;
+      tone = 'ok';
+    } else if (status.found === false) {
+      head = 'สถานะปุ่มค้นหา: ❌ ไม่เจอปุ่มค้นหา';
+      tone = 'bad';
+    } else {
+      head = 'สถานะปุ่มค้นหา: ⏳ เปิดแท็บ Jinbao รายการที่อนุมัติแล้ว…';
+      tone = 'muted';
+    }
+    const reason = status.reason ? String(status.reason) : '';
+    let timePart = '';
+    if (status.at) {
+      try {
+        const d = new Date(status.at);
+        if (!Number.isNaN(d.getTime())) {
+          timePart = d.toLocaleTimeString('th-TH', { hour12: false });
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    const tail =
+      reason || timePart
+        ? `ล่าสุด: ${[reason, timePart].filter(Boolean).join(' · ')}`
+        : '';
+    return {
+      text: tail ? `${head}\n${tail}` : head,
+      tone,
+    };
+  }
+
   return {
     clampPendingOrdersPollMs,
     clampApprovedSearchPollMs,
+    formatApprovedSearchStatusLine,
     DEFAULT_SCRAPE_POLL_MS,
     DEFAULT_APPROVED_SEARCH_POLL_MS,
   };

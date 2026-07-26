@@ -114,6 +114,26 @@
       .warn-danger strong {
         font-weight: 700;
       }
+      #searchBtnStatus {
+        margin: 0;
+        white-space: pre-line;
+        font-weight: 600;
+      }
+      #searchBtnStatus[data-tone="ok"] {
+        color: #2e7d32;
+      }
+      #searchBtnStatus[data-tone="bad"] {
+        color: #c62828;
+      }
+      #searchBtnStatus[data-tone="muted"] {
+        color: var(--muted);
+      }
+      .save-flash {
+        margin: 0;
+        color: #2e7d32;
+        font-weight: 600;
+        min-height: 1.2em;
+      }
       #searchPresets {
         flex-wrap: wrap;
         justify-content: flex-start;
@@ -160,6 +180,7 @@
           <button type="button" data-sec="120">120s</button>
         </div>
         <button id="savePoll" type="button">Save scrape refresh</button>
+        <p id="saveScrapeFlash" class="save-flash" aria-live="polite"></p>
       </section>
 
       <section>
@@ -176,6 +197,8 @@
           <button type="button" data-sec="120">120s</button>
         </div>
         <button id="saveSearchPoll" type="button">Save page refresh</button>
+        <p id="saveSearchFlash" class="save-flash" aria-live="polite"></p>
+        <p id="searchBtnStatus" class="muted" data-tone="muted">สถานะปุ่มค้นหา: ⏳ เปิดแท็บ Jinbao รายการที่อนุมัติแล้ว…</p>
         <p class="warn-danger">
           <strong>คำเตือน:</strong> ห้ามติ๊ก 「โหลดอัตโนมัติทุก 3 นาที」 บนหน้าเว็บ Jinbao
           ใช้รีเฟรชของ ClipSync (กดค้นหา) แทน — ถ้าติ๊กทั้งคู่จะโหลดซ้ำและอาจช้า/ชนกัน

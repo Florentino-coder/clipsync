@@ -41,3 +41,36 @@ describe('clampApprovedSearchPollMs', () => {
     assert.strictEqual(clampApprovedSearchPollMs(15000), 15000);
   });
 });
+
+describe('formatApprovedSearchStatusLine', () => {
+  const { formatApprovedSearchStatusLine } = require('../poll_settings.js');
+
+  it('shows waiting copy when status missing', () => {
+    const line = formatApprovedSearchStatusLine(null);
+    assert.match(line.text, /⏳/);
+    assert.equal(line.tone, 'muted');
+  });
+
+  it('shows found + reason', () => {
+    const line = formatApprovedSearchStatusLine({
+      found: true,
+      reason: 'clicked',
+      detail: 'ค้นหา',
+      at: '2026-07-26T04:32:01.000Z',
+    });
+    assert.match(line.text, /✅ เจอแล้ว/);
+    assert.match(line.text, /ค้นหา/);
+    assert.match(line.text, /clicked/);
+    assert.equal(line.tone, 'ok');
+  });
+
+  it('shows not-found tone', () => {
+    const line = formatApprovedSearchStatusLine({
+      found: false,
+      reason: 'no_button',
+      at: '2026-07-26T04:32:01.000Z',
+    });
+    assert.match(line.text, /❌ ไม่เจอปุ่มค้นหา/);
+    assert.equal(line.tone, 'bad');
+  });
+});
