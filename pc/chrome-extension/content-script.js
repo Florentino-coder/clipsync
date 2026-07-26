@@ -393,12 +393,10 @@ function showResultBanner(ok, detail) {
     pendingOrdersTimer = setInterval(() => publishPendingOrders(profiles), interval);
   }
 
-  function startCanaryInterval(profiles) {
+  function startCanaryInterval(profiles, pollMs) {
     runHealthCheck(profiles);
     setInterval(() => runHealthCheck(profiles), 3 * 60 * 1000);
-    chrome.storage.local.get(['pendingOrdersPollMs'], (data) => {
-      restartPendingOrdersTimer(profiles, data.pendingOrdersPollMs);
-    });
+    restartPendingOrdersTimer(profiles, pollMs);
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -410,12 +408,12 @@ function showResultBanner(ok, detail) {
     });
   });
 
-  chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
-    const profiles = siteProfiles || [];
+  chrome.storage.local.get(['siteProfiles', 'pendingOrdersPollMs'], (data) => {
+    const profiles = data.siteProfiles || [];
     if (activeProfiles(profiles).length === 0) return;
 
     wireObservers(profiles);
-    startCanaryInterval(profiles);
+    startCanaryInterval(profiles, data.pendingOrdersPollMs);
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
