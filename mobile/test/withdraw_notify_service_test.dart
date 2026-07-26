@@ -60,6 +60,13 @@ void main() {
     expect(parsed?['account'], '020323427136');
   });
 
+  test('decodeWithdrawNotifyPayload accepts legacy plain order id', () {
+    final parsed = decodeWithdrawNotifyPayload('ORD-LEGACY');
+    expect(parsed?['order_id'], 'ORD-LEGACY');
+    expect(parsed?['amount'], '');
+    expect(parsed?['account'], '');
+  });
+
   test('copyTextForAction picks amount or account', () {
     final data = {
       'order_id': 'ORD-1',
