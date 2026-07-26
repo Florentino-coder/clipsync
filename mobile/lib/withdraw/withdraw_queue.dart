@@ -80,4 +80,14 @@ class WithdrawQueue {
   }
 
   WithdrawItemState? stateOf(String orderId) => _states[orderId];
+
+  /// Clears pending withdraw items only (keeps processing/failed).
+  void clearPending() {
+    final ids = _orders.keys
+        .where((id) => _states[id] == WithdrawItemState.pending)
+        .toList(growable: false);
+    for (final id in ids) {
+      markDone(id);
+    }
+  }
 }

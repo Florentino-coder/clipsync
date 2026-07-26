@@ -10,14 +10,14 @@
     "notes": "Fix amount cents false-reject as ref fragment; match baht integer only"
   },
   "android": {
-    "version": "0.9.9+33",
+    "version": "0.9.9+34",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "Restore amount fallback when Thai จำนวนเงิน label missing (Latin OCR)"
+    "notes": "Emoji withdraw notify/inbox; harden shade copy UI; inbox clear-pending button"
   },
   "extension": {
     "version": "1.0.44",
     "download_url": "",
-    "notes": "Do not scrape row index as withdraw amount; prefer จำนวนเงิน/THB decimals"
+    "notes": "1.0.43 Search click/Save alert/status; 1.0.44 do not scrape row index as amount"
   }
 }

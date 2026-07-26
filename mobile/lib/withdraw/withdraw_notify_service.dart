@@ -99,11 +99,54 @@ String formatWithdrawNotifyBody({
   required String account,
   required String bank,
   required String accountName,
+  String? withdrawAt,
+  String? approvedAt,
 }) {
-  final bankLabel = bank.trim().isEmpty ? '—' : bank.trim();
+  return formatWithdrawInboxLines(
+    amount: amount,
+    account: account,
+    bank: bank,
+    accountName: accountName,
+    withdrawAt: withdrawAt,
+    approvedAt: approvedAt,
+  ).join('\n');
+}
+
+/// Shared notify + inbox display lines (emoji + Thai labels).
+List<String> formatWithdrawInboxLines({
+  required String amount,
+  required String account,
+  required String bank,
+  required String accountName,
+  String? stateLabel,
+  String? withdrawAt,
+  String? approvedAt,
+}) {
+  final lines = <String>[
+    '💰 ยอด: $amount',
+    '🏦 บัญชี: $account',
+  ];
+  final bankLabel = bank.trim();
+  if (bankLabel.isNotEmpty) {
+    lines.add('🏧 ธนาคาร: $bankLabel');
+  }
   final name = accountName.trim();
-  final bankNameLine = name.isEmpty ? bankLabel : '$bankLabel · $name';
-  return 'ยอด: $amount\nบัญชี: $account\n$bankNameLine';
+  if (name.isNotEmpty) {
+    lines.add('👤 ชื่อ: $name');
+  }
+  final withdraw = withdrawAt?.trim() ?? '';
+  if (withdraw.isNotEmpty) {
+    lines.add('🕒 ถอน: $withdraw');
+  }
+  final approved = approvedAt?.trim() ?? '';
+  if (approved.isNotEmpty) {
+    lines.add('✅ อนุมัติ: $approved');
+  }
+  final state = stateLabel?.trim() ?? '';
+  if (state.isNotEmpty) {
+    lines.add(state);
+  }
+  return lines;
 }
 
 typedef CopyHandler = Future<void> Function(String actionId, String text);
@@ -217,13 +260,13 @@ class WithdrawNotifyService {
             const AndroidNotificationAction(
               kCopyAmountActionId,
               'คัดลอกยอด',
-              showsUserInterface: false,
+              showsUserInterface: true,
               cancelNotification: false,
             ),
             const AndroidNotificationAction(
               kCopyAccountActionId,
               'คัดลอกบัญชี',
-              showsUserInterface: false,
+              showsUserInterface: true,
               cancelNotification: false,
             ),
           ]

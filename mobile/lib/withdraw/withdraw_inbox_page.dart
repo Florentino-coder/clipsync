@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'bank_logos.dart';
+import 'withdraw_notify_service.dart';
 import 'withdraw_order.dart';
 import 'withdraw_queue.dart';
 
@@ -14,6 +15,7 @@ class WithdrawInboxPage extends StatefulWidget {
     required this.queue,
     this.onActiveChanged,
     this.onCopied,
+    this.onCleared,
   });
 
   final WithdrawQueue queue;
@@ -23,6 +25,9 @@ class WithdrawInboxPage extends StatefulWidget {
 
   /// Toast / snackbar after per-row copy.
   final void Function(String label, String text)? onCopied;
+
+  /// Called after pending queue is cleared (e.g. refresh notification).
+  final Future<void> Function()? onCleared;
 
   @override
   State<WithdrawInboxPage> createState() => _WithdrawInboxPageState();
@@ -62,6 +67,29 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
     await widget.onActiveChanged?.call(order);
   }
 
+  Future<void> _confirmClearPending() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: const Text('ล้างรายการถอนรอโอนทั้งหมด?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('ยกเลิก'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('เคลียร์'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    widget.queue.clearPending();
+    setState(() {});
+    await widget.onCleared?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
     final pending = widget.queue.pending;
@@ -71,6 +99,13 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('รายการถอนรอโอน'),
+        actions: [
+          if (pending.isNotEmpty)
+            TextButton(
+              onPressed: () => unawaited(_confirmClearPending()),
+              child: const Text('เคลียร์งาน'),
+            ),
+        ],
       ),
       body: pending.isEmpty
           ? Center(
@@ -83,7 +118,7 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
               ),
             )
           : ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
               itemCount: pending.length,
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
@@ -91,31 +126,44 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
                 final canCopy = widget.queue.canCopy(order.orderId);
                 final isActive = order.orderId == activeId;
                 final state = widget.queue.stateOf(order.orderId);
-                final name = order.accountName.trim();
-                final bankLabel = order.bank.trim();
-                final bankNameLine = [
-                  if (bankLabel.isNotEmpty) bankLabel,
-                  if (name.isNotEmpty) name,
-                  _stateLabel(state),
-                ].where((s) => s.isNotEmpty).join(' · ');
+                final lines = formatWithdrawInboxLines(
+                  amount: order.amount,
+                  account: order.account,
+                  bank: order.bank,
+                  accountName: order.accountName,
+                  stateLabel: _stateLabel(state),
+                );
+                final amountLine = lines.isNotEmpty ? lines.first : '💰 ยอด: ${order.amount}';
+                final detailLines = lines.length > 1 ? lines.sublist(1) : const <String>[];
 
                 return ListTile(
                   selected: isActive,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   leading: Image.asset(
                     bankLogoAsset(order.bank),
                     width: 40,
                     height: 40,
-                    errorBuilder: (_, __, ___) => const Icon(Icons.account_balance),
+                    errorBuilder: (_, __, ___) =>
+                        const Icon(Icons.account_balance),
                   ),
                   title: Text(
-                    '฿${order.amount}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    amountLine,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 18,
+                    ),
                   ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(order.account),
-                      if (bankNameLine.isNotEmpty) Text(bankNameLine),
+                      for (final line in detailLines)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(line),
+                        ),
                       Wrap(
                         spacing: 4,
                         children: [

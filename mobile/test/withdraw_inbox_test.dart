@@ -39,9 +39,12 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: WithdrawInboxPage(queue: q)));
     expect(find.text('คัดลอกยอด'), findsOneWidget);
     expect(find.text('คัดลอกบัญชี'), findsOneWidget);
-    expect(find.byType(TextButton), findsNWidgets(2));
-    expect(find.text('4774090171'), findsOneWidget);
-    expect(find.text('KBANK · สมชาย · รอโอน'), findsOneWidget);
+    expect(find.byType(TextButton), findsWidgets);
+    expect(find.textContaining('🏦 บัญชี: 4774090171'), findsOneWidget);
+    expect(find.textContaining('🏧 ธนาคาร: KBANK'), findsOneWidget);
+    expect(find.textContaining('👤 ชื่อ: สมชาย'), findsOneWidget);
+    expect(find.text('รอโอน'), findsOneWidget);
+    expect(find.text('เคลียร์งาน'), findsOneWidget);
     expect(find.byIcon(Icons.payments_outlined), findsNothing);
     expect(find.byIcon(Icons.account_balance_wallet_outlined), findsNothing);
   });
@@ -104,5 +107,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(copiedText, '4774090171');
     expect(copiedLabel, 'คัดลอกบัญชีแล้ว');
+  });
+
+  testWidgets('เคลียร์งาน confirms then clears pending queue', (tester) async {
+    final q = WithdrawQueue();
+    q.upsert(WithdrawOrder(
+      orderId: 'W-1',
+      amount: '100.00',
+      account: '4774090171',
+      bank: 'KBANK',
+      accountName: 'สมชาย',
+      ts: 1,
+    ));
+    var cleared = false;
+    await tester.pumpWidget(MaterialApp(
+      home: WithdrawInboxPage(
+        queue: q,
+        onCleared: () async {
+          cleared = true;
+        },
+      ),
+    ));
+    expect(find.text('เคลียร์งาน'), findsOneWidget);
+    await tester.tap(find.text('เคลียร์งาน'));
+    await tester.pumpAndSettle();
+    expect(find.text('ล้างรายการถอนรอโอนทั้งหมด?'), findsOneWidget);
+    await tester.tap(find.text('เคลียร์'));
+    await tester.pumpAndSettle();
+    expect(q.pending, isEmpty);
+    expect(cleared, isTrue);
+    expect(find.text('ไม่มีรายการถอนรอโอน'), findsOneWidget);
   });
 }

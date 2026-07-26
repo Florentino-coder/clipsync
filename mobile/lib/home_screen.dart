@@ -669,6 +669,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             );
           },
+          onCleared: () async {
+            setState(() {});
+            await WithdrawNotifyService.instance.syncFromQueue(
+              _withdrawQueue,
+              allowHeadsUp: false,
+            );
+            _addEvent('Cleared pending withdraw queue');
+          },
         ),
       ),
     );

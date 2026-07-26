@@ -78,17 +78,33 @@ void main() {
     expect(copyTextForAction('other', data), isNull);
   });
 
-  test('formatWithdrawNotifyBody uses brief labels', () {
+  test('formatWithdrawNotifyBody uses emoji structured lines', () {
     final body = formatWithdrawNotifyBody(
-      amount: '1.00',
-      account: '020323427136',
-      bank: 'GSB',
+      amount: '5,000.00',
+      account: '1048989698',
+      bank: 'KBANK',
       accountName: 'ทดสอบ',
     );
-    expect(body, contains('ยอด: 1.00'));
-    expect(body, contains('บัญชี: 020323427136'));
-    expect(body, contains('GSB'));
-    expect(body, contains('ทดสอบ'));
+    expect(body, contains('💰 ยอด: 5,000.00'));
+    expect(body, contains('🏦 บัญชี: 1048989698'));
+    expect(body, contains('🏧 ธนาคาร: KBANK'));
+    expect(body, contains('👤 ชื่อ: ทดสอบ'));
+    expect(body.split('\n').length, greaterThanOrEqualTo(4));
+  });
+
+  test('formatWithdrawInboxLines matches notify emoji fields', () {
+    final lines = formatWithdrawInboxLines(
+      amount: '5,000.00',
+      account: '1048989698',
+      bank: 'KBANK',
+      accountName: 'ทดสอบ',
+      stateLabel: 'รอโอน',
+    );
+    expect(lines.first, '💰 ยอด: 5,000.00');
+    expect(lines, contains('🏦 บัญชี: 1048989698'));
+    expect(lines, contains('🏧 ธนาคาร: KBANK'));
+    expect(lines, contains('👤 ชื่อ: ทดสอบ'));
+    expect(lines, contains('รอโอน'));
   });
 
   test('resolveWithdrawCopyText prefers payload over queue', () {

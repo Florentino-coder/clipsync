@@ -68,4 +68,15 @@ void main() {
     expect(q.canCopy('A'), isFalse);
     expect(q.stateOf('A'), WithdrawItemState.failed);
   });
+
+  test('clearPending removes only pending items', () {
+    final q = WithdrawQueue();
+    q.upsert(order('A', ts: 1));
+    q.upsert(order('B', ts: 2));
+    q.markProcessing('B');
+    q.clearPending();
+    expect(q.pending, isEmpty);
+    expect(q.stateOf('B'), WithdrawItemState.processing);
+    expect(q.canCopy('A'), isFalse);
+  });
 }
