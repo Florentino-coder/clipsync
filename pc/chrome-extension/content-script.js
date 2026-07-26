@@ -328,6 +328,15 @@ function showResultBanner(ok, detail) {
     }
   }
 
+  const clampPendingOrdersPollMs =
+    typeof ClipSyncPollSettings !== 'undefined'
+      ? ClipSyncPollSettings.clampPendingOrdersPollMs
+      : (value, fallback = 45000) => {
+          const n = Number(value);
+          if (!Number.isFinite(n)) return fallback;
+          return Math.min(300000, Math.max(10000, Math.round(n)));
+        };
+
   let scrapeTimer = null;
   function schedulePendingScrape(profiles) {
     if (scrapeTimer) clearTimeout(scrapeTimer);
@@ -376,11 +385,30 @@ function showResultBanner(ok, detail) {
     schedulePendingScrape(profiles);
   }
 
+  let pendingOrdersTimer = null;
+
+  function restartPendingOrdersTimer(profiles, ms) {
+    if (pendingOrdersTimer) clearInterval(pendingOrdersTimer);
+    const interval = clampPendingOrdersPollMs(ms);
+    pendingOrdersTimer = setInterval(() => publishPendingOrders(profiles), interval);
+  }
+
   function startCanaryInterval(profiles) {
     runHealthCheck(profiles);
     setInterval(() => runHealthCheck(profiles), 3 * 60 * 1000);
-    setInterval(() => publishPendingOrders(profiles), 45000);
+    chrome.storage.local.get(['pendingOrdersPollMs'], (data) => {
+      restartPendingOrdersTimer(profiles, data.pendingOrdersPollMs);
+    });
   }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.pendingOrdersPollMs) return;
+    chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
+      const profiles = siteProfiles || [];
+      if (activeProfiles(profiles).length === 0) return;
+      restartPendingOrdersTimer(profiles, changes.pendingOrdersPollMs.newValue);
+    });
+  });
 
   chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
     const profiles = siteProfiles || [];

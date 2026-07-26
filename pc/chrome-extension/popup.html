@@ -36,13 +36,26 @@
         font-weight: 600;
       }
       input[type="text"],
-      input[type="password"] {
+      input[type="password"],
+      input[type="number"] {
         width: 100%;
         box-sizing: border-box;
         padding: 6px 8px;
         border: 1px solid var(--line);
         border-radius: 6px;
         font: inherit;
+      }
+      section {
+        display: grid;
+        gap: 8px;
+      }
+      #pollPresets {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+      }
+      #pollPresets button {
+        flex: 1 1 auto;
+        min-width: 44px;
       }
       .row {
         display: flex;
@@ -117,6 +130,22 @@
       </div>
 
       <section>
+        <label>
+          Pending orders refresh (seconds)
+          <input id="pollSeconds" type="number" min="10" max="300" step="5" />
+        </label>
+        <p class="muted">ตั้งค่าความถี่รีเฟรชรายการรอดำเนินการ (10–300 วินาที)</p>
+        <div class="row" id="pollPresets">
+          <button type="button" data-sec="15">15s</button>
+          <button type="button" data-sec="30">30s</button>
+          <button type="button" data-sec="45">45s</button>
+          <button type="button" data-sec="60">60s</button>
+          <button type="button" data-sec="120">120s</button>
+        </div>
+        <button id="savePoll" type="button">Save refresh</button>
+      </section>
+
+      <section>
         <div class="row">
           <strong>Profiles</strong>
           <span id="profileCount" class="muted">0</span>
@@ -125,6 +154,7 @@
         <p id="emptyProfiles" class="muted">No profiles yet — PC pushes type site_profiles.</p>
       </section>
     </main>
+    <script src="poll_settings.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

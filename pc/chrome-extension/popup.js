@@ -8,6 +8,37 @@ const saveBtn = document.getElementById('saveToken');
 const profileListEl = document.getElementById('profileList');
 const profileCountEl = document.getElementById('profileCount');
 const emptyProfilesEl = document.getElementById('emptyProfiles');
+const pollSecondsEl = document.getElementById('pollSeconds');
+const pollPresetsEl = document.getElementById('pollPresets');
+const savePollBtn = document.getElementById('savePoll');
+
+const clampPendingOrdersPollMs =
+  typeof ClipSyncPollSettings !== 'undefined'
+    ? ClipSyncPollSettings.clampPendingOrdersPollMs
+    : (value, fallback = 45000) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.min(300000, Math.max(10000, Math.round(n)));
+      };
+
+const DEFAULT_POLL_MS = 45000;
+
+function msToSeconds(ms) {
+  return Math.round(clampPendingOrdersPollMs(ms) / 1000);
+}
+
+function renderPollSettings(pendingOrdersPollMs) {
+  if (!pollSecondsEl) return;
+  pollSecondsEl.value = String(msToSeconds(pendingOrdersPollMs));
+}
+
+function savePollSettings() {
+  const sec = Number(pollSecondsEl.value);
+  const ms = clampPendingOrdersPollMs(sec * 1000);
+  chrome.storage.local.set({ pendingOrdersPollMs: ms }, () => {
+    renderPollSettings(ms);
+  });
+}
 
 function renderStatus(status) {
   const value = status || 'disconnected';
@@ -60,11 +91,17 @@ function escapeHtml(text) {
 }
 
 function refresh() {
-  chrome.storage.local.get(['pairingToken', 'connectionStatus', 'siteProfiles'], (data) => {
-    if (data.pairingToken) tokenEl.value = data.pairingToken;
-    renderStatus(data.connectionStatus);
-    renderProfiles(data.siteProfiles);
-  });
+  chrome.storage.local.get(
+    ['pairingToken', 'connectionStatus', 'siteProfiles', 'pendingOrdersPollMs'],
+    (data) => {
+      if (data.pairingToken) tokenEl.value = data.pairingToken;
+      renderStatus(data.connectionStatus);
+      renderProfiles(data.siteProfiles);
+      renderPollSettings(
+        data.pendingOrdersPollMs != null ? data.pendingOrdersPollMs : DEFAULT_POLL_MS
+      );
+    }
+  );
 }
 
 saveBtn.addEventListener('click', () => {
@@ -75,12 +112,27 @@ saveBtn.addEventListener('click', () => {
   });
 });
 
+if (pollPresetsEl) {
+  pollPresetsEl.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-sec]');
+    if (!btn || !pollSecondsEl) return;
+    pollSecondsEl.value = btn.dataset.sec;
+  });
+}
+
+if (savePollBtn) {
+  savePollBtn.addEventListener('click', savePollSettings);
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.connectionStatus) renderStatus(changes.connectionStatus.newValue);
   if (changes.siteProfiles) renderProfiles(changes.siteProfiles.newValue);
   if (changes.pairingToken && changes.pairingToken.newValue !== undefined) {
     tokenEl.value = changes.pairingToken.newValue || '';
+  }
+  if (changes.pendingOrdersPollMs) {
+    renderPollSettings(changes.pendingOrdersPollMs.newValue);
   }
 });
 
