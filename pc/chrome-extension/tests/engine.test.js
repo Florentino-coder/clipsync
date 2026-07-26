@@ -2011,4 +2011,35 @@ describe('approved Search refresh (กดค้นหา)', () => {
     assert.equal(result.clicked, false);
     assert.equal(result.reason, 'wrong_tab');
   });
+
+  it('probeApprovedSearchStatus reports found button without clicking', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body>
+        <form>
+          <button type="submit" class="btn btn-primary">ค้นหา</button>
+        </form>
+      </body>`,
+      { url: 'https://manage.jinbao356.com/withdraw/transaction?tab=1' }
+    );
+    global.document = dom.window.document;
+    const p = {
+      ...profile,
+      withdraw_notify_tab_query: 'tab=1',
+      approved_search_button_selectors: [
+        'button.btn-primary',
+        'button[type="submit"]',
+        'button',
+      ],
+    };
+    const status = probeApprovedSearchStatus(p, document, {
+      intervalMs: 10000,
+      at: '2026-07-26T11:30:00+07:00',
+    });
+    assert.equal(status.found, true);
+    assert.equal(status.reason, 'probed');
+    assert.match(status.detail, /ค้นหา/);
+    assert.match(status.href, /tab=1/);
+    assert.equal(status.intervalSec, 10);
+    assert.equal(status.at, '2026-07-26T11:30:00+07:00');
+  });
 });

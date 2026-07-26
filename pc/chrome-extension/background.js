@@ -374,6 +374,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
     return true;
   }
+  if (message.type === 'get_approved_search_status') {
+    chrome.storage.local.get([STORAGE_KEYS.siteProfiles], (data) => {
+      const profiles = mergeBundledProfiles(
+        Array.isArray(data[STORAGE_KEYS.siteProfiles])
+          ? data[STORAGE_KEYS.siteProfiles]
+          : []
+      );
+      const patterns = profiles.flatMap((p) => (p && p.domain_patterns) || []);
+      if (patterns.length === 0) {
+        sendResponse({ ok: false, reason: 'no_site_profile' });
+        return;
+      }
+      chrome.tabs.query({ url: patterns }, (tabs) => {
+        if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
+          sendResponse({ ok: false, reason: 'admin_tab_not_found' });
+          return;
+        }
+        const sorted = tabs
+          .slice()
+          .sort(
+            (a, b) =>
+              Number(Boolean(b.active)) - Number(Boolean(a.active)) ||
+              (b.lastAccessed || 0) - (a.lastAccessed || 0)
+          );
+        chrome.tabs.sendMessage(
+          sorted[0].id,
+          { type: 'get_approved_search_status' },
+          (resp) => {
+            if (chrome.runtime.lastError || !resp) {
+              sendResponse({ ok: false, reason: 'content_script_unreachable' });
+              return;
+            }
+            sendResponse(resp);
+          }
+        );
+      });
+    });
+    return true;
+  }
   // Content script → PC bridge (health, pending_orders, …)
   if (message.type === 'health' || message.type === 'pending_orders') {
     const ok = forwardToBridge(message);

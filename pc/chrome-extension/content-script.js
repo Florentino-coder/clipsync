@@ -388,10 +388,49 @@ function showResultBanner(ok, detail) {
     }
   }
 
+  function publishApprovedSearchStatus(status) {
+    try {
+      chrome.storage.local.set({ approvedSearchStatus: status });
+    } catch (_) {
+      /* extension context invalidated */
+    }
+  }
+
+  function probeAndStoreSearchStatus(profiles, clickResult, intervalMs) {
+    if (typeof E.probeApprovedSearchStatus !== 'function') return null;
+    const list = activeProfiles(profiles);
+    const profile = list[0];
+    if (!profile) {
+      const empty = {
+        found: null,
+        reason: 'no_profile',
+        detail: '',
+        href: String(location.href || ''),
+        at: new Date().toISOString(),
+      };
+      publishApprovedSearchStatus(empty);
+      return empty;
+    }
+    const status = E.probeApprovedSearchStatus(profile, document, {
+      clickResult: clickResult || undefined,
+      intervalMs,
+      at: new Date().toISOString(),
+    });
+    publishApprovedSearchStatus(status);
+    return status;
+  }
+
   function runApprovedSearchRefresh(profiles) {
     if (typeof E.maybeClickApprovedSearch !== 'function') return;
     for (const profile of activeProfiles(profiles)) {
-      E.maybeClickApprovedSearch(profile, document, { confirmInFlight });
+      const result = E.maybeClickApprovedSearch(profile, document, { confirmInFlight });
+      chrome.storage.local.get(['approvedSearchPollMs'], (data) => {
+        probeAndStoreSearchStatus(
+          [profile],
+          result,
+          data && data.approvedSearchPollMs
+        );
+      });
     }
   }
 
@@ -427,6 +466,7 @@ function showResultBanner(ok, detail) {
     setInterval(() => runHealthCheck(profiles), 3 * 60 * 1000);
     restartPendingOrdersTimer(profiles, pollMs);
     restartApprovedSearchTimer(profiles, searchMs);
+    probeAndStoreSearchStatus(profiles, null, searchMs);
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -455,7 +495,21 @@ function showResultBanner(ok, detail) {
   );
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || message.type !== 'confirm_order') return;
+    if (!message || typeof message !== 'object') return;
+
+    if (message.type === 'get_approved_search_status') {
+      chrome.storage.local.get(['siteProfiles', 'approvedSearchPollMs'], (data) => {
+        const status = probeAndStoreSearchStatus(
+          data.siteProfiles || [],
+          null,
+          data.approvedSearchPollMs
+        );
+        sendResponse({ ok: true, status: status || null });
+      });
+      return true;
+    }
+
+    if (message.type !== 'confirm_order') return;
 
     chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
       enqueue(async () => {
