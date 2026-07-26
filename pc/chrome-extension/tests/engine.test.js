@@ -21,6 +21,8 @@ const {
   findApprovedSearchButton,
   maybeClickApprovedSearch,
   probeApprovedSearchStatus,
+  readResultsCountLabel,
+  isResultsCountStable,
   apiAdapter,
   runWorkflow,
   selectOption,
@@ -2135,5 +2137,21 @@ describe('approved Search refresh (กดค้นหา)', () => {
     assert.match(status.href, /tab=1/);
     assert.equal(status.intervalSec, 10);
     assert.equal(status.at, '2026-07-26T11:30:00+07:00');
+  });
+});
+
+describe('results count settle helpers', () => {
+  it('readResultsCountLabel parses พบ : N รายการ', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body><div class="result">พบ : 4 รายการ</div></body>`
+    );
+    assert.equal(readResultsCountLabel(dom.window.document), '4');
+  });
+
+  it('isResultsCountStable when พบ text unchanged across samples', () => {
+    assert.equal(isResultsCountStable(['4', '4']), true);
+    assert.equal(isResultsCountStable(['1', '4']), false);
+    assert.equal(isResultsCountStable([null, '4']), false);
+    assert.equal(isResultsCountStable(['4']), false);
   });
 });

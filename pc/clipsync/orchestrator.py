@@ -27,6 +27,9 @@ from clipsync.withdraw_notify import build_withdraw_notify_payload, new_orders_s
 logger = logging.getLogger(__name__)
 
 CONFIRM_TIMEOUT_DEFAULT = 60.0
+MATCH_RETRY_BUDGET_S = 4.0
+MATCH_RETRY_OFFSETS_S = (0.0, 1.3, 2.6)
+SLIP_SEARCH_PAUSE_MS = 8000
 
 SendAckCallback = Callable[[str], Awaitable[None] | None]
 SendWithdrawNotifyCallback = Callable[[dict[str, Any]], None]
@@ -274,6 +277,69 @@ class SlipOrchestrator:
         if asyncio.iscoroutine(result):
             await result
 
+    async def _prepare_extension_for_slip(self) -> None:
+        """Pause Search refresh and ask for a fresh scrape before matching."""
+        bridge = self._bridge
+        if bridge is None:
+            return
+        reached = False
+        try:
+            pause = getattr(bridge, "push_pause_approved_search", None)
+            if callable(pause):
+                result = pause(ms=SLIP_SEARCH_PAUSE_MS)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                # Real bridge returns client count (int). MagicMock is not int.
+                if isinstance(result, int) and result > 0:
+                    reached = True
+            scrape = getattr(bridge, "push_request_pending_scrape", None)
+            if callable(scrape):
+                result = scrape()
+                if asyncio.iscoroutine(result):
+                    result = await result
+                if isinstance(result, int) and result > 0:
+                    reached = True
+        except Exception:
+            logger.exception("prepare extension for slip failed")
+        # Yield only when a real extension client was reached (skip in unit mocks).
+        if reached:
+            await asyncio.sleep(0.4)
+
+    async def _match_with_short_retry(
+        self, event_data: Mapping[str, Any]
+    ) -> tuple[Optional[dict[str, Any]], Optional[str], int]:
+        """Retry soft ``no_match`` only, within MATCH_RETRY_BUDGET_S (~4s)."""
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        last_matched: Optional[dict[str, Any]] = None
+        last_block: Optional[str] = "no_match"
+        attempt = 0
+        for offset in MATCH_RETRY_OFFSETS_S:
+            delay = offset - (loop.time() - start)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if loop.time() - start > MATCH_RETRY_BUDGET_S + 0.05:
+                break
+            attempt += 1
+            matched = resolve_auto_match(
+                event_data,
+                self._pending_orders,
+                self._cfg,
+                used_refs=self._used_refs,
+            )
+            block = auto_confirm_block_reason(event_data, matched, self._cfg)
+            if block is None:
+                return matched, None, attempt
+            if block != "no_match":
+                return matched, block, attempt
+            last_matched, last_block = matched, block
+            if attempt > 1:
+                self._log_activity(
+                    f"Slip match retry ({event_data.get('amount')}): "
+                    f"attempt {attempt}/3"
+                )
+        return last_matched, last_block, attempt
+
     async def handle_slip_event(
         self,
         event: Mapping[str, Any],
@@ -311,11 +377,11 @@ class SlipOrchestrator:
         if sender_last4:
             event_data["sender_account_last4"] = sender_last4
 
-        matched = resolve_auto_match(
-            event_data, self._pending_orders, self._cfg, used_refs=self._used_refs
-        )
+        await self._prepare_extension_for_slip()
 
-        block_reason = auto_confirm_block_reason(event_data, matched, self._cfg)
+        matched, block_reason, _attempts = await self._match_with_short_retry(
+            event_data
+        )
         if block_reason is not None:
             result = self._audit_and_return(
                 event_data,

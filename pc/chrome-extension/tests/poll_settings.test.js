@@ -73,4 +73,15 @@ describe('formatApprovedSearchStatusLine', () => {
     assert.match(line.text, /❌ ไม่เจอปุ่มค้นหา/);
     assert.equal(line.tone, 'bad');
   });
+
+  it('maps paused_for_confirm to Thai pause label', () => {
+    const line = formatApprovedSearchStatusLine({
+      found: true,
+      reason: 'paused_for_confirm',
+      detail: 'ค้นหา',
+      at: '2026-07-26T04:32:01.000Z',
+    });
+    assert.match(line.text, /พักรีเฟรช \(กำลังยืนยัน\/สลิป\)/);
+    assert.equal(line.tone, 'ok');
+  });
 });

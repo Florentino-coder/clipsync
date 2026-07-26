@@ -3,11 +3,11 @@
   "released_at": "2026-07-26",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.15",
+    "version": "0.9.16",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Fix amount cents false-reject as ref fragment; match baht integer only"
+    "notes": "0.9.16 pause Search + request scrape on slip; retry no_match within 4s"
   },
   "android": {
     "version": "0.9.9+35",
@@ -16,8 +16,8 @@
     "notes": "0.9.9+35 fix shade คัดลอกยอด/บัญชี on cold start (launch details + plugin registrant)"
   },
   "extension": {
-    "version": "1.0.45",
+    "version": "1.0.47",
     "download_url": "",
-    "notes": "1.0.45 click visible approved-tab Search in MAIN world (false clicked on hidden pane)"
+    "notes": "1.0.47 settle after Search scrape; pause/scrape on slip; confirm pause from 1.0.46"
   }
 }

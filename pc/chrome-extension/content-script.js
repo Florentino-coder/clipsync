@@ -10,6 +10,19 @@
   /** @type {Promise<void>} */
   let commandQueue = Promise.resolve();
   let confirmInFlight = false;
+  /** Epoch ms — skip กดค้นหา until this time (confirm + short cooldown). */
+  let approvedSearchPauseUntil = 0;
+  const SEARCH_PAUSE_AFTER_CONFIRM_MS = 45000;
+  const SEARCH_PAUSE_WHILE_CONFIRM_MS = 120000;
+
+  function pauseApprovedSearch(ms) {
+    const until = Date.now() + Math.max(0, Number(ms) || 0);
+    if (until > approvedSearchPauseUntil) approvedSearchPauseUntil = until;
+  }
+
+  function approvedSearchIsPaused() {
+    return confirmInFlight || Date.now() < approvedSearchPauseUntil;
+  }
 
   function urlMatchesPattern(url, pattern) {
     if (typeof pattern !== 'string' || !pattern) return false;
@@ -120,6 +133,7 @@ function showResultBanner(ok, detail) {
 
   async function handleConfirmOrder(data, profiles) {
     confirmInFlight = true;
+    pauseApprovedSearch(SEARCH_PAUSE_WHILE_CONFIRM_MS);
     try {
       const orderId = data && data.orderId != null ? String(data.orderId) : '';
       const amount = data && data.amount != null ? String(data.amount) : '';
@@ -158,6 +172,8 @@ function showResultBanner(ok, detail) {
       }
     } finally {
       confirmInFlight = false;
+      // Keep Search paused briefly so the page settles after modal / Swal closes.
+      pauseApprovedSearch(SEARCH_PAUSE_AFTER_CONFIRM_MS);
     }
   }
 
@@ -428,7 +444,10 @@ function showResultBanner(ok, detail) {
   function runApprovedSearchRefresh(profiles) {
     if (typeof E.maybeClickApprovedSearch !== 'function') return;
     for (const profile of activeProfiles(profiles)) {
-      const result = E.maybeClickApprovedSearch(profile, document, { confirmInFlight });
+      const paused = approvedSearchIsPaused();
+      const result = paused
+        ? { clicked: false, reason: 'paused_for_confirm' }
+        : E.maybeClickApprovedSearch(profile, document, { confirmInFlight });
       chrome.storage.local.get(['approvedSearchPollMs'], (data) => {
         probeAndStoreSearchStatus(
           [profile],
@@ -436,6 +455,46 @@ function showResultBanner(ok, detail) {
           data && data.approvedSearchPollMs
         );
       });
+      // After a real Search click, wait for 「พบ: N」 to settle then scrape.
+      if (result && result.clicked) {
+        void settleThenScrape(profiles);
+      }
+    }
+  }
+
+  async function settleThenScrape(profiles) {
+    const maxMs = 2500;
+    const stableMs = 800;
+    const pollMs = 200;
+    const start = Date.now();
+    let last =
+      typeof E.readResultsCountLabel === 'function'
+        ? E.readResultsCountLabel(document)
+        : null;
+    let lastChange = Date.now();
+    while (Date.now() - start < maxMs) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      if (approvedSearchIsPaused() && confirmInFlight) return;
+      const cur =
+        typeof E.readResultsCountLabel === 'function'
+          ? E.readResultsCountLabel(document)
+          : null;
+      if (cur !== last) {
+        last = cur;
+        lastChange = Date.now();
+      } else if (
+        cur != null &&
+        Date.now() - lastChange >= stableMs &&
+        typeof E.isResultsCountStable === 'function' &&
+        E.isResultsCountStable([last, cur])
+      ) {
+        break;
+      }
+    }
+    try {
+      await publishPendingOrders(profiles);
+    } catch (_) {
+      /* ignore */
     }
   }
 
@@ -514,14 +573,39 @@ function showResultBanner(ok, detail) {
       return true;
     }
 
-    if (message.type !== 'confirm_order') return;
-
-    chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
-      enqueue(async () => {
-        const resp = await handleConfirmOrder(message, siteProfiles || []);
-        sendResponse(resp);
+    if (message.type === 'confirm_order') {
+      // Pause Search as soon as confirm is queued (before the async handler runs).
+      pauseApprovedSearch(SEARCH_PAUSE_WHILE_CONFIRM_MS);
+      chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
+        enqueue(async () => {
+          const resp = await handleConfirmOrder(message, siteProfiles || []);
+          sendResponse(resp);
+        });
       });
-    });
-    return true;
+      return true;
+    }
+
+    // Optional: PC/bridge can ask to pause Search while a slip is being matched.
+    if (message.type === 'pause_approved_search') {
+      const ms = Number(message.ms);
+      pauseApprovedSearch(Number.isFinite(ms) && ms > 0 ? ms : SEARCH_PAUSE_WHILE_CONFIRM_MS);
+      sendResponse({ ok: true, until: approvedSearchPauseUntil });
+      return true;
+    }
+
+    if (message.type === 'request_pending_scrape') {
+      chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
+        void publishPendingOrders(siteProfiles || []).finally(() => {
+          try {
+            sendResponse({ ok: true });
+          } catch (_) {
+            /* ignore */
+          }
+        });
+      });
+      return true;
+    }
+
+    return;
   });
 })();

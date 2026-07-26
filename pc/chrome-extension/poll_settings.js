@@ -52,7 +52,15 @@
       head = 'สถานะปุ่มค้นหา: ⏳ เปิดแท็บ Jinbao รายการที่อนุมัติแล้ว…';
       tone = 'muted';
     }
-    const reason = status.reason ? String(status.reason) : '';
+    const reasonRaw = status.reason ? String(status.reason) : '';
+    const reasonMap = {
+      paused_for_confirm: 'พักรีเฟรช (กำลังยืนยัน/สลิป)',
+      confirm_in_flight: 'พักรีเฟรช (กำลังยืนยัน)',
+      busy: 'พักรีเฟรช (busy)',
+      clicked: 'clicked',
+      probed: 'probed',
+    };
+    const reason = reasonMap[reasonRaw] || reasonRaw;
     let timePart = '';
     if (status.at) {
       try {

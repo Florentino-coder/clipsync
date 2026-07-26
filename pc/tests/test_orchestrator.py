@@ -702,3 +702,144 @@ async def test_live_1006_empty_from_pending_missing_sender_last4(tmp_path: Path)
     assert audits[-1].get("reason") == "missing_sender_last4"
     assert audits[-1].get("ocr_confidence") == 0.42
 
+
+@pytest.mark.asyncio
+async def test_slip_prepare_pauses_search_and_requests_scrape(tmp_path: Path):
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    bridge.push_pause_approved_search = AsyncMock(return_value=1)
+    bridge.push_request_pending_scrape = AsyncMock(return_value=1)
+    orch = _make_orchestrator(tmp_path, bridge)
+    orch.on_pending_orders(
+        {
+            "type": "pending_orders",
+            "orders": [{"orderId": "1234", "amount": 350.0, "accountLast4": "6789"}],
+        }
+    )
+
+    async def _reply() -> None:
+        for _ in range(80):
+            if bridge.push_confirm_order.await_count:
+                orch.on_confirm_result(
+                    {
+                        "type": "confirm_result",
+                        "orderId": "1234",
+                        "ok": True,
+                        "verified": True,
+                        "reason": None,
+                    }
+                )
+                return
+            await asyncio.sleep(0.05)
+
+    t = asyncio.create_task(_reply())
+    result = await orch.handle_slip_event(EVENT, source="usb")
+    await t
+
+    bridge.push_pause_approved_search.assert_awaited()
+    bridge.push_request_pending_scrape.assert_awaited()
+    assert result["decision"] == "auto_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_no_match_retries_then_pending_review(tmp_path: Path):
+    """Wrong last4 on scrape list → no_match; retry within 4s then review."""
+    import time
+
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    bridge.push_pause_approved_search = AsyncMock()
+    bridge.push_request_pending_scrape = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+    orch.on_pending_orders(
+        {
+            "type": "pending_orders",
+            "orders": [{"orderId": "1234", "amount": 350.0, "accountLast4": "9999"}],
+        }
+    )
+
+    t0 = time.monotonic()
+    result = await orch.handle_slip_event(EVENT, source="usb")
+    elapsed = time.monotonic() - t0
+
+    bridge.push_confirm_order.assert_not_awaited()
+    assert result["decision"] == "pending_review"
+    assert result.get("reason") == "no_match"
+    assert elapsed < 5.0
+    assert elapsed >= 2.0  # at least second retry offset
+
+
+@pytest.mark.asyncio
+async def test_no_match_becomes_match_on_retry(tmp_path: Path):
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    bridge.push_pause_approved_search = AsyncMock()
+    bridge.push_request_pending_scrape = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+    orch.on_pending_orders(
+        {
+            "type": "pending_orders",
+            "orders": [{"orderId": "1234", "amount": 350.0, "accountLast4": "9999"}],
+        }
+    )
+
+    async def _fix_orders() -> None:
+        await asyncio.sleep(1.0)
+        orch.on_pending_orders(
+            {
+                "type": "pending_orders",
+                "orders": [
+                    {"orderId": "1234", "amount": 350.0, "accountLast4": "6789"}
+                ],
+            }
+        )
+
+    async def _reply() -> None:
+        for _ in range(80):
+            if bridge.push_confirm_order.await_count:
+                orch.on_confirm_result(
+                    {
+                        "type": "confirm_result",
+                        "orderId": "1234",
+                        "ok": True,
+                        "verified": True,
+                        "reason": None,
+                    }
+                )
+                return
+            await asyncio.sleep(0.05)
+
+    t_fix = asyncio.create_task(_fix_orders())
+    t_reply = asyncio.create_task(_reply())
+    result = await orch.handle_slip_event(EVENT, source="usb")
+    await t_fix
+    await t_reply
+
+    bridge.push_confirm_order.assert_awaited_once()
+    assert result["decision"] == "auto_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_over_threshold_does_not_spend_full_retry_budget(tmp_path: Path):
+    import time
+
+    bridge = MagicMock()
+    bridge.push_confirm_order = AsyncMock()
+    bridge.push_pause_approved_search = AsyncMock()
+    bridge.push_request_pending_scrape = AsyncMock()
+    orch = _make_orchestrator(tmp_path, bridge)
+    orch.on_pending_orders(
+        {
+            "type": "pending_orders",
+            "orders": [{"orderId": "99", "amount": 6000.0, "accountLast4": "6789"}],
+        }
+    )
+
+    event = {**EVENT, "event_id": "evt-hi-fast", "amount": 6000.0}
+    t0 = time.monotonic()
+    result = await orch.handle_slip_event(event, source="usb")
+    elapsed = time.monotonic() - t0
+
+    assert result["decision"] == "pending_review"
+    assert elapsed < 1.5  # prepare ~0.4 + one attempt; no 2.6s retries
+

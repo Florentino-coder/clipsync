@@ -116,6 +116,25 @@ class ChromeBridge:
         await self._broadcast(json.dumps(payload))
         return len(self._clients)
 
+    async def push_pause_approved_search(self, ms: int = 8000) -> int:
+        """Ask extension to pause Jinbao Search refresh while matching a slip."""
+        payload = {
+            "type": "pause_approved_search",
+            "ms": int(ms) if ms is not None else 8000,
+        }
+        if not self._clients:
+            return 0
+        await self._broadcast(json.dumps(payload))
+        return len(self._clients)
+
+    async def push_request_pending_scrape(self) -> int:
+        """Ask extension to publish a fresh pending_orders scrape now."""
+        payload = {"type": "request_pending_scrape"}
+        if not self._clients:
+            return 0
+        await self._broadcast(json.dumps(payload))
+        return len(self._clients)
+
     async def push_site_profiles(self, profiles: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> int:
         """Push validated site profiles to authenticated extension clients.
 

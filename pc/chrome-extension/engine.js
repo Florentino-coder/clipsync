@@ -398,6 +398,33 @@
   }
 
   /**
+   * Read Jinbao 「พบ: N รายการ」 label for post-Search settle detection.
+   * @returns {string|null} digit string without commas, or null if not found
+   */
+  function readResultsCountLabel(doc) {
+    const document = getDocument(doc);
+    if (!document || !document.body) return null;
+    let t = '';
+    try {
+      t = String(document.body.innerText || document.body.textContent || '');
+    } catch (_) {
+      return null;
+    }
+    const m = t.match(/พบ\s*[:：]?\s*([\d,]+)\s*รายการ/);
+    if (!m) return null;
+    return String(m[1]).replace(/,/g, '');
+  }
+
+  /** True when the last two non-empty samples are equal. */
+  function isResultsCountStable(samples) {
+    if (!Array.isArray(samples) || samples.length < 2) return false;
+    const a = samples[samples.length - 2];
+    const b = samples[samples.length - 1];
+    if (a == null || b == null) return false;
+    return String(a) === String(b);
+  }
+
+  /**
    * Native submit / force-click for BootstrapVue 「ค้นหา」 (isolated-world fallback).
    */
   function clickApprovedSearchButton(btn) {
@@ -528,7 +555,8 @@
       if (clickResult.clicked) found = true;
       else if (reason === 'no_button') found = false;
       else if (reason === 'wrong_tab' || reason === 'unknown_tab') found = btn ? true : false;
-      else if (reason === 'busy' || reason === 'confirm_in_flight') found = btn ? true : false;
+      else if (reason === 'busy' || reason === 'confirm_in_flight' || reason === 'paused_for_confirm')
+        found = btn ? true : false;
       else found = Boolean(btn);
     } else if (tab === false) {
       reason = 'wrong_tab';
@@ -3238,6 +3266,8 @@
     findApprovedSearchButton,
     maybeClickApprovedSearch,
     probeApprovedSearchStatus,
+    readResultsCountLabel,
+    isResultsCountStable,
     outlineButton,
     clickableTarget,
     dispatchClick,

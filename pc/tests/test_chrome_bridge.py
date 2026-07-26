@@ -66,6 +66,28 @@ async def test_push_confirm_order_reaches_authenticated_client(bridge: ChromeBri
         assert json.loads(raw) == {"type": "confirm_order", "orderId": "1234"}
 
 
+async def test_push_pause_approved_search(bridge: ChromeBridge):
+    uri = f"ws://127.0.0.1:{bridge.port}"
+    async with websockets.connect(uri) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": TOKEN}))
+        assert json.loads(await ws.recv())["type"] == "auth_success"
+
+        await bridge.push_pause_approved_search(ms=8000)
+        raw = await asyncio.wait_for(ws.recv(), timeout=2)
+        assert json.loads(raw) == {"type": "pause_approved_search", "ms": 8000}
+
+
+async def test_push_request_pending_scrape(bridge: ChromeBridge):
+    uri = f"ws://127.0.0.1:{bridge.port}"
+    async with websockets.connect(uri) as ws:
+        await ws.send(json.dumps({"type": "auth", "token": TOKEN}))
+        assert json.loads(await ws.recv())["type"] == "auth_success"
+
+        await bridge.push_request_pending_scrape()
+        raw = await asyncio.wait_for(ws.recv(), timeout=2)
+        assert json.loads(raw) == {"type": "request_pending_scrape"}
+
+
 async def test_push_site_profiles_reaches_authenticated_client(bridge: ChromeBridge):
     from clipsync.site_profiles import default_profile
 

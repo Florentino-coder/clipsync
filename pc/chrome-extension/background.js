@@ -170,6 +170,28 @@ function forwardConfirmToTab(orderId, data, profiles) {
   });
 }
 
+/** Fire-and-forget control messages (pause Search / request scrape) — no confirm_result. */
+function forwardControlToAdminTab(data) {
+  chrome.storage.local.get([STORAGE_KEYS.siteProfiles], ({ siteProfiles }) => {
+    const merged = mergeBundledProfiles(siteProfiles);
+    const patterns = merged.flatMap((p) => (p && p.domain_patterns) || []);
+    if (patterns.length === 0) return;
+    chrome.tabs.query({ url: patterns }, (tabs) => {
+      if (chrome.runtime.lastError || !tabs || tabs.length === 0) return;
+      const sorted = tabs
+        .slice()
+        .sort(
+          (a, b) =>
+            Number(Boolean(b.active)) - Number(Boolean(a.active)) ||
+            (b.lastAccessed || 0) - (a.lastAccessed || 0)
+        );
+      const tab = sorted[0];
+      if (!tab || tab.id == null) return;
+      chrome.tabs.sendMessage(tab.id, data, () => void chrome.runtime.lastError);
+    });
+  });
+}
+
 function handleServerMessage(raw) {
   let data;
   try {
@@ -193,6 +215,10 @@ function handleServerMessage(raw) {
       break;
     case 'confirm_order':
       forwardToAdminTab(data);
+      break;
+    case 'pause_approved_search':
+    case 'request_pending_scrape':
+      forwardControlToAdminTab(data);
       break;
     default:
       break;
