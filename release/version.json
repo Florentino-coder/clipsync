@@ -16,8 +16,8 @@
     "notes": "Restore amount fallback when Thai จำนวนเงิน label missing (Latin OCR)"
   },
   "extension": {
-    "version": "1.0.43",
+    "version": "1.0.44",
     "download_url": "",
-    "notes": "Search click fix (tab=1/submit); Save alert; button found status"
+    "notes": "Do not scrape row index as withdraw amount; prefer จำนวนเงิน/THB decimals"
   }
 }

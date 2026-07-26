@@ -300,6 +300,32 @@ describe('deepFindByText + findRow + findConfirmButton', () => {
     assert.match(String(orders[0].name || orders[0].account_name || ''), /โคภีส/);
   });
 
+  it('scrapePendingOrders does not treat row index as amount', () => {
+    const dom = new JSDOM(`<!DOCTYPE html><body>
+      <div class="el-tabs__item is-active">รายการที่อนุมัติแล้ว</div>
+      <table class="el-table"><tbody>
+        <tr class="el-table__row">
+          <td>1</td>
+          <td>สมาชิก 1048989698 กสิกรไทย</td>
+          <td>จำนวนเงิน : 5,000.00THB</td>
+          <td>อนุมัติ</td>
+        </tr>
+      </tbody></table>
+    </body>`);
+    global.document = dom.window.document;
+    const profile = {
+      profile_id: 'jinbao356_v1',
+      row_selector_hints: ['tr.el-table__row', 'tbody tr'],
+      withdraw_notify_status_include: ['อนุมัติ', 'อนุมัติแล้ว', 'approved'],
+    };
+    const orders = scrapePendingOrders(profile);
+    assert.equal(orders.length, 1, JSON.stringify(orders));
+    const amt = String(orders[0].amount || '').replace(/,/g, '');
+    assert.ok(amt === '5000' || amt === '5000.00' || /5000/.test(amt), JSON.stringify(orders[0]));
+    assert.notEqual(amt, '1');
+    assert.notEqual(orders[0].amount, '1');
+  });
+
   it('scrapePendingOrders skips รออนุมัติ pending-approval rows', () => {
     const dom = new JSDOM(`<!DOCTYPE html><body>
       <div class="el-tabs__item is-active">รายการรออนุมัติ</div>

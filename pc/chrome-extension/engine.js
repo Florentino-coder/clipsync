@@ -454,21 +454,53 @@
 
     // Jinbao often shows whole baht as "1000" / "1,000" (no .00). Require
     // decimals OR 1–8 digit whole amounts so 9–12 digit accounts are not amounts.
+    // Reject bare 1–3 digit ints (row ลำดับ) unless labeled จำนวนเงิน/THB/บาท.
     const amountRe = /[\d,]+\.\d{2}|\b\d{1,3}(?:,\d{3})+\b|\b\d{1,8}\b/g;
+    const amountTokenRe = /[\d,]+\.\d{2}|\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d{4,8}(?:\.\d{2})?/;
     const amountCellRe = /^[\d,]+\.\d{2}$/;
-    const amountWholeCellRe = /^(?:\d{1,3}(?:,\d{3})+|\d{1,8})$/;
-    const accountRe = /\b(\d{9,12})\b/g;
+    const amountWholeCellRe = /^(?:\d{1,3}(?:,\d{3})+|\d{4,8})$/;
+    const bareSeqRe = /^\d{1,3}$/;
+    const amountLabelRe = /จำนวนเงิน|THB|บาท/i;
+
+    function extractLabeledAmount(raw) {
+      const src = String(raw || '');
+      if (!amountLabelRe.test(src)) return '';
+      const cleaned = src
+        .replace(/[฿$]/g, ' ')
+        .replace(/บาท/gi, ' ')
+        .replace(/THB/gi, ' ');
+      const m = cleaned.match(amountTokenRe);
+      return m ? m[0] : '';
+    }
 
     function cellAmountText(raw) {
-      const t = String(raw || '')
+      const original = String(raw || '');
+      const labeled = extractLabeledAmount(original);
+      if (labeled) return labeled;
+
+      const t = original
         .replace(/[฿$]/g, '')
         .replace(/บาท/g, '')
         .trim()
         .replace(/\s+/g, '');
       if (!t) return '';
+      if (bareSeqRe.test(t)) return '';
       if (amountCellRe.test(t) || amountWholeCellRe.test(t)) return t;
+      // Prefer money-looking token inside a noisy cell (e.g. "5,000.00THB").
+      const loose = t.match(/[\d,]+\.\d{2}/);
+      if (loose) return loose[0];
       return '';
     }
+
+    function amountPreference(token) {
+      const s = String(token || '');
+      if (/[\d,]+\.\d{2}/.test(s)) return 3;
+      if (/\d{1,3}(?:,\d{3})+/.test(s)) return 2;
+      if (/^\d{4,8}$/.test(s.replace(/,/g, ''))) return 1;
+      return 0;
+    }
+    const accountRe = /\b(\d{9,12})\b/g;
+
     const bankNeedles = [
       ['KBANK', ['กสิกร', 'kasikorn', 'kbank', 'k+']],
       ['SCB', ['ไทยพาณิชย์', 'scb', 'siam commercial']],
@@ -547,26 +579,40 @@
 
       // Prefer a cell that is exactly an amount so adjacent account digits are not glued on
       // (JSDOM/textContent often concatenates "4774090171" + "100.00" → "4774090171100.00").
+      // Prefer labeled / decimal amounts over short bare ints (ลำดับ).
       let amountStr = '';
+      let amountRank = -1;
       for (const cell of cells) {
         const hit = cellAmountText(cell.textContent || '');
-        if (hit) {
+        if (!hit) continue;
+        const rank =
+          amountPreference(hit) + (amountLabelRe.test(cell.textContent || '') ? 10 : 0);
+        if (rank > amountRank) {
           amountStr = hit;
-          break;
+          amountRank = rank;
         }
       }
       if (!amountStr) {
         amountRe.lastIndex = 0;
         let bestAmt = '';
+        let bestRank = -1;
         let mAmt;
         while ((mAmt = amountRe.exec(text)) !== null) {
           const candidate = mAmt[0];
           const digits = candidate.replace(/\D/g, '');
           // Skip account-length digit runs picked up from loose whole-amount regex.
           if (!candidate.includes('.') && digits.length >= 9) continue;
-          // Prefer shorter amount-like matches (real amounts), not account+amount concatenations.
-          if (!bestAmt || digits.length < bestAmt.replace(/\D/g, '').length) {
+          // Skip bare 1–3 digit seq numbers from full-row regex scan.
+          if (!candidate.includes(',') && !candidate.includes('.') && digits.length <= 3) {
+            continue;
+          }
+          const rank = amountPreference(candidate);
+          if (
+            rank > bestRank ||
+            (rank === bestRank && digits.length < bestAmt.replace(/\D/g, '').length)
+          ) {
             bestAmt = candidate;
+            bestRank = rank;
           }
         }
         if (!bestAmt) continue;
