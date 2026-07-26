@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'withdraw_native_notify.dart';
 import 'withdraw_queue.dart';
 
 const kWithdrawDetailNotifyId = 41001;
@@ -166,16 +164,15 @@ OpenInboxHandler? onOpenWithdrawInbox;
 class WithdrawNotifyService {
   WithdrawNotifyService({
     FlutterLocalNotificationsPlugin? plugin,
+    @Deprecated('Phase A: native ClipboardCopyReceiver owns shade copy')
     CopyHandler? onCopy,
     DateTime Function()? clock,
   })  : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
-        _onCopy = onCopy,
         _clock = clock ?? DateTime.now;
 
   static final WithdrawNotifyService instance = WithdrawNotifyService();
 
   final FlutterLocalNotificationsPlugin _plugin;
-  final CopyHandler? _onCopy;
   final DateTime Function() _clock;
 
   DateTime? _lastHeadsUp;
@@ -210,11 +207,38 @@ class WithdrawNotifyService {
       ),
     );
 
+    WithdrawNativeNotify.ensureOpenInboxListener(_onNativeOpenInbox);
+
     _initialized = true;
+  }
+
+  void _onNativeOpenInbox(String orderId) {
+    final q = withdrawQueueProvider?.call();
+    if (q != null && orderId.isNotEmpty) {
+      q.setActive(orderId);
+      unawaited(() async {
+        try {
+          await syncFromQueue(q, allowHeadsUp: false);
+        } catch (_) {}
+      }());
+    }
+    final open = onOpenWithdrawInbox;
+    if (open != null) {
+      open(orderId);
+    } else {
+      FlutterForegroundTask.sendDataToMain({
+        'type': 'open_withdraw_inbox',
+        'order_id': orderId,
+      });
+    }
   }
 
   /// Sync detail (+ summary when pending > 1) from [q].
   /// Pass [wasEmpty] as the queue empty-state *before* the upsert that triggered sync.
+  ///
+  /// Detail notify (id [kWithdrawDetailNotifyId]) is posted by native Android so
+  /// shade **คัดลอกยอด / คัดลอกบัญชี** copy via BroadcastReceiver without Dart.
+  /// Summary group notify stays on flutter_local_notifications.
   Future<void> syncFromQueue(
     WithdrawQueue q, {
     required bool allowHeadsUp,
@@ -224,6 +248,7 @@ class WithdrawNotifyService {
 
     final pending = q.pending;
     if (pending.isEmpty) {
+      await WithdrawNativeNotify.cancel(id: kWithdrawDetailNotifyId);
       await _plugin.cancel(kWithdrawDetailNotifyId);
       await _plugin.cancel(kWithdrawSummaryNotifyId);
       return;
@@ -256,51 +281,22 @@ class WithdrawNotifyService {
     );
 
     final canCopy = q.canCopy(active.orderId);
-    final actions = canCopy
-        ? <AndroidNotificationAction>[
-            const AndroidNotificationAction(
-              kCopyAmountActionId,
-              'คัดลอกยอด',
-              showsUserInterface: true,
-              cancelNotification: false,
-            ),
-            const AndroidNotificationAction(
-              kCopyAccountActionId,
-              'คัดลอกบัญชี',
-              showsUserInterface: true,
-              cancelNotification: false,
-            ),
-          ]
-        : <AndroidNotificationAction>[];
 
-    final importance = headsUp ? Importance.high : Importance.low;
-    final priority = headsUp ? Priority.high : Priority.low;
-
-    final androidDetails = AndroidNotificationDetails(
-      kWithdrawChannelId,
-      kWithdrawChannelName,
-      channelDescription: 'Pending withdraw order alerts',
-      importance: importance,
-      priority: priority,
-      category: AndroidNotificationCategory.status,
-      actions: actions,
-      groupKey: 'withdraw_pending',
-      styleInformation: BigTextStyleInformation(
-        body,
-        contentTitle: 'รายการถอนใหม่',
-        summaryText: pending.length > 1 ? '${pending.length} รายการ' : null,
-      ),
-      onlyAlertOnce: !headsUp,
-      number: pending.length,
+    // Phase A: native owns detail notification + copy actions.
+    await WithdrawNativeNotify.show(
+      orderId: active.orderId,
+      amount: active.amount,
+      account: active.account,
+      bank: active.bank,
+      accountName: active.accountName,
+      body: body,
+      title: 'รายการถอนใหม่',
+      canCopy: canCopy,
+      headsUp: headsUp,
+      pendingCount: pending.length,
     );
-
-    await _plugin.show(
-      kWithdrawDetailNotifyId,
-      'รายการถอนใหม่',
-      body,
-      NotificationDetails(android: androidDetails),
-      payload: notifyPayload,
-    );
+    // Drop any leftover FLN detail so we don't double-post.
+    await _plugin.cancel(kWithdrawDetailNotifyId);
 
     if (pending.length > 1) {
       final summaryAndroid = AndroidNotificationDetails(
@@ -362,61 +358,57 @@ class WithdrawNotifyService {
       return;
     }
 
-    if (actionId != kCopyAmountActionId && actionId != kCopyAccountActionId) {
+    // Phase A: native BroadcastReceiver owns shade copy actions. Ignore any
+    // leftover FLN copy callbacks so we never double-write the clipboard.
+    if (actionId == kCopyAmountActionId || actionId == kCopyAccountActionId) {
       return;
     }
-
-    final q = withdrawQueueProvider?.call();
-    final text = resolveWithdrawCopyText(
-      actionId: actionId,
-      payload: payload,
-      queueAmount: q?.copyAmountText(),
-      queueAccount: q?.copyAccountText(),
-    );
-    if (text == null || text.isEmpty) return;
-
-    if (_onCopy != null) {
-      await _onCopy!(actionId, text);
-      return;
-    }
-
-    await Clipboard.setData(ClipboardData(text: text));
-    FlutterForegroundTask.sendDataToMain({
-      'type': 'withdraw_copy',
-      'action': actionId,
-      'text': text,
-    });
   }
 
-  /// If the app was launched by tapping a withdraw notification (body or copy
-  /// action with [showsUserInterface]), run the same handler as a live tap.
-  ///
-  /// Copy actions must NOT be skipped: with `showsUserInterface: true`, Android
-  /// often cold-starts the UI and delivers the action only via launch details —
-  /// the background isolate may never reliably write the clipboard.
+  /// Open inbox from a native detail notification body tap (intent extras),
+  /// then fall through to FLN launch details (summary / legacy notifies).
   Future<void> handleLaunchDetails() async {
     await init();
+
+    final nativeOrderId = await WithdrawNativeNotify.takeOpenInboxOrderId();
+    if (nativeOrderId != null && nativeOrderId.isNotEmpty) {
+      final q = withdrawQueueProvider?.call();
+      if (q != null) {
+        q.setActive(nativeOrderId);
+        try {
+          await syncFromQueue(q, allowHeadsUp: false);
+        } catch (_) {}
+      }
+      final open = onOpenWithdrawInbox;
+      if (open != null) {
+        open(nativeOrderId);
+      } else {
+        FlutterForegroundTask.sendDataToMain({
+          'type': 'open_withdraw_inbox',
+          'order_id': nativeOrderId,
+        });
+      }
+    }
+
     final details = await _plugin.getNotificationAppLaunchDetails();
     if (details?.didNotificationLaunchApp != true) return;
     final response = details!.notificationResponse;
     if (response == null) return;
+    // Skip FLN copy actions (native owns copy); still handle body taps.
+    final actionId = response.actionId;
+    if (actionId == kCopyAmountActionId || actionId == kCopyAccountActionId) {
+      return;
+    }
     await _handleAction(response);
   }
 }
 
 @pragma('vm:entry-point')
 void withdrawNotifyBackgroundResponse(NotificationResponse response) {
-  // Background isolate — register plugins or Clipboard.setData is a no-op on
-  // many OEM builds when the UI process was not already alive.
-  WidgetsFlutterBinding.ensureInitialized();
-  DartPluginRegistrant.ensureInitialized();
+  // Phase A: native ClipboardCopyReceiver owns shade copy. No-op Dart background
+  // copy to avoid double-handling / flaky isolate Clipboard.setData.
+  // Body taps with showsUserInterface are delivered via launch details / FGS.
   final actionId = response.actionId;
   if (actionId == null || actionId.isEmpty) return;
-  final text = resolveWithdrawCopyText(
-    actionId: actionId,
-    payload: response.payload,
-  );
-  if (text == null || text.isEmpty) return;
-  // Fire-and-forget; isolate may be torn down after return.
-  unawaited(Clipboard.setData(ClipboardData(text: text)));
+  // Intentionally ignore copy_* (and any other) background actions.
 }

@@ -44,5 +44,9 @@
             android:exported="false"/>
 
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver" />
+
+        <receiver
+            android:name=".withdraw.ClipboardCopyReceiver"
+            android:exported="false" />
     </application>
 </manifest>
