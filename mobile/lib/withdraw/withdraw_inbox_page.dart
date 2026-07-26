@@ -116,14 +116,15 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
                     children: [
                       Text(order.account),
                       if (bankNameLine.isNotEmpty) Text(bankNameLine),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+                      Wrap(
+                        spacing: 4,
                         children: [
                           TextButton(
                             style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
                             ),
                             onPressed: canCopy
                                 ? () => _copy('คัดลอกยอดแล้ว', order.amount)
@@ -132,9 +133,10 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
                           ),
                           TextButton(
                             style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
                             ),
                             onPressed: canCopy
                                 ? () => _copy('คัดลอกบัญชีแล้ว', order.account)

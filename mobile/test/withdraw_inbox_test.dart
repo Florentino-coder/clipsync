@@ -40,6 +40,8 @@ void main() {
     expect(find.text('คัดลอกยอด'), findsOneWidget);
     expect(find.text('คัดลอกบัญชี'), findsOneWidget);
     expect(find.byType(TextButton), findsNWidgets(2));
+    expect(find.text('4774090171'), findsOneWidget);
+    expect(find.text('KBANK · สมชาย · รอโอน'), findsOneWidget);
     expect(find.byIcon(Icons.payments_outlined), findsNothing);
     expect(find.byIcon(Icons.account_balance_wallet_outlined), findsNothing);
   });
@@ -69,5 +71,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(copiedText, '100.00');
     expect(copiedLabel, 'คัดลอกยอดแล้ว');
+  });
+
+  testWidgets('tap คัดลอกบัญชี copies account via callback', (tester) async {
+    final q = WithdrawQueue();
+    q.upsert(WithdrawOrder(
+      orderId: 'W-1',
+      amount: '100.00',
+      account: '4774090171',
+      bank: 'KBANK',
+      accountName: 'สมชาย',
+      ts: 1,
+    ));
+    String? copiedLabel;
+    String? copiedText;
+    await tester.pumpWidget(MaterialApp(
+      home: WithdrawInboxPage(
+        queue: q,
+        onCopied: (label, text) {
+          copiedLabel = label;
+          copiedText = text;
+        },
+      ),
+    ));
+    await tester.tap(find.text('คัดลอกบัญชี'));
+    await tester.pumpAndSettle();
+    expect(copiedText, '4774090171');
+    expect(copiedLabel, 'คัดลอกบัญชีแล้ว');
   });
 }
