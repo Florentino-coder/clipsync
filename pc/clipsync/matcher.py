@@ -132,11 +132,26 @@ def _order_bank(order: Mapping[str, Any]) -> str:
     return ""
 
 
+def _ocr_amount_looks_like_ref_fragment(ocr: Mapping[str, Any]) -> bool:
+    """True when OCR amount digits likely came from รหัสอ้างอิง, not the amount label."""
+    ref = ocr.get("ref_number")
+    if ref is None or not str(ref).strip():
+        return False
+    ref_text = str(ref).strip()
+    amount = ocr.get("amount")
+    if amount is None:
+        return False
+    digits_only = "".join(ch for ch in str(amount).strip().replace(",", "") if ch.isdigit())
+    return len(digits_only) >= 4 and digits_only in ref_text
+
+
 def _candidate_matches(
     ocr: Mapping[str, Any],
     order: Mapping[str, Any],
     cfg: Mapping[str, Any],
 ) -> bool:
+    if _ocr_amount_looks_like_ref_fragment(ocr):
+        return False
     # Missing/None amounts never match (do not coerce to 0.0).
     if "amount" not in ocr or "amount" not in order:
         return False

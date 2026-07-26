@@ -497,3 +497,33 @@ def test_is_reliable_order_id_rejects_page_index():
     assert is_reliable_order_id("0971572720") is True
     assert is_reliable_order_id("acct:0722488474") is True
     assert is_reliable_order_id("") is False
+
+
+def test_rejects_ref_fragment_ocr_amount():
+    """7268 from ref 202607268… must not match even when a same-amount order exists."""
+    ref = "202607268XRZLCrFvm0JLRag6"
+    ocr_bad = {
+        "amount": 7268,
+        "ref_number": ref,
+        "receiver_account_last4": "1756",
+        "ocr_confidence": 0.95,
+    }
+    trap_orders = [{"order_id": "trap", "amount": 7268.0, "account_last4": "1756"}]
+    assert match_order(ocr_bad, trap_orders, CFG, used_refs=set()) is None
+
+    real_orders = [{"order_id": "w-3727", "amount": 3727.00, "account_last4": "1756"}]
+    assert match_order(ocr_bad, real_orders, CFG, used_refs=set()) is None
+
+
+def test_correct_amount_still_matches_with_alphanumeric_ref():
+    ref = "202607268XRZLCrFvm0JLRag6"
+    ocr_good = {
+        "amount": 3727.00,
+        "ref_number": ref,
+        "receiver_account_last4": "1756",
+        "ocr_confidence": 0.95,
+    }
+    orders = [{"order_id": "w-3727", "amount": 3727.00, "account_last4": "1756"}]
+    result = match_order(ocr_good, orders, CFG, used_refs=set())
+    assert result is not None
+    assert result["order_id"] == "w-3727"
