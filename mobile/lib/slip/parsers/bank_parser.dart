@@ -120,7 +120,9 @@ bool amountLooksLikeRefFragment({
   )) {
     return true;
   }
-  final digitsOnly = amountToken.replaceAll(RegExp(r'[^0-9]'), '');
+  // Baht integer digits only — "3,727.00" → "3727", never "372700" (cents).
+  final intPart = amountToken.replaceAll(',', '').split('.').first;
+  final digitsOnly = intPart.replaceAll(RegExp(r'[^0-9]'), '');
   if (digitsOnly.length >= 4 && refNumber.contains(digitsOnly)) {
     return true;
   }
@@ -208,6 +210,37 @@ double? extractAmountNearLabel(
   return null;
 }
 
+/// Fallback when Thai/English amount labels are missing (common with Latin-only
+/// ML Kit). Take the first money-like token that is not a ref fragment / fee.
+double? extractAmountFallback(
+  String raw, {
+  required String? refNumber,
+  int refStart = -1,
+  int refEnd = -1,
+}) {
+  final amountRe = RegExp(r'([\d,]+\.\d{2})');
+  for (final match in amountRe.allMatches(raw)) {
+    final token = match.group(1)!;
+    if (amountLooksLikeRefFragment(
+      amountToken: token,
+      refNumber: refNumber,
+      amountStart: match.start,
+      refStart: refStart,
+      refEnd: refEnd,
+    )) {
+      continue;
+    }
+    final lineStart = raw.lastIndexOf('\n', match.start) + 1;
+    final linePrefix = raw.substring(lineStart, match.start);
+    if (linePrefix.contains('ค่าธรรมเนียม') || linePrefix.contains('Fee')) {
+      continue;
+    }
+    final amount = double.tryParse(token.replaceAll(',', ''));
+    if (amount != null && amount > 0) return amount;
+  }
+  return null;
+}
+
 /// True when [tmpl] is a masked account template (has mask glyphs), not a bare
 /// digit run that could be ref leakage.
 bool isRealMaskedAccountTemplate(String? tmpl) {
@@ -256,6 +289,46 @@ List<String> extractBankCodesInOrder(String raw) {
   return ordered;
 }
 
+/// First index of any [labels] in [raw], or -1.
+/// English markers use word boundaries so "TO" does not hit "TOTAL"/"AUTO".
+int _labelIndex(String raw, List<String> labels) {
+  var best = -1;
+  for (final label in labels) {
+    final idx = _findLabel(raw, label);
+    if (idx >= 0 && (best < 0 || idx < best)) best = idx;
+  }
+  return best;
+}
+
+/// Last index of any [labels] at or before [pos], or -1.
+int _labelLastIndexBefore(String raw, int pos, List<String> labels) {
+  var best = -1;
+  final slice = raw.substring(0, pos.clamp(0, raw.length));
+  for (final label in labels) {
+    final idx = _findLabelLast(slice, label);
+    if (idx > best) best = idx;
+  }
+  return best;
+}
+
+bool _isAsciiWordLabel(String label) => RegExp(r'^[A-Za-z]+$').hasMatch(label);
+
+int _findLabel(String raw, String label) {
+  if (!_isAsciiWordLabel(label)) return raw.indexOf(label);
+  final re = RegExp('\\b${RegExp.escape(label)}\\b');
+  return re.firstMatch(raw)?.start ?? -1;
+}
+
+int _findLabelLast(String raw, String label) {
+  if (!_isAsciiWordLabel(label)) return raw.lastIndexOf(label);
+  final re = RegExp('\\b${RegExp.escape(label)}\\b');
+  Match? last;
+  for (final m in re.allMatches(raw)) {
+    last = m;
+  }
+  return last?.start ?? -1;
+}
+
 ParsedSlip parseSlipFields(
   String raw, {
   required int minRefLength,
@@ -273,11 +346,17 @@ ParsedSlip parseSlipFields(
   final refEnd = refSpan?.end ?? -1;
 
   final amount = extractAmountNearLabel(
-    raw,
-    refNumber: ref,
-    refStart: refStart,
-    refEnd: refEnd,
-  );
+        raw,
+        refNumber: ref,
+        refStart: refStart,
+        refEnd: refEnd,
+      ) ??
+      extractAmountFallback(
+        raw,
+        refNumber: ref,
+        refStart: refStart,
+        refEnd: refEnd,
+      );
   if (amount == null || amount <= 0) {
     errors.add('amount_invalid');
   }
@@ -342,16 +421,24 @@ ParsedSlip parseSlipFields(
   // Section labels, when OCR managed to read them. จาก = payer, ไปยัง = payee.
   // A token belongs to the section of the closest label ABOVE it.
   bool inSenderSection(int pos) {
-    final fromIdx = raw.indexOf('จาก');
+    final fromIdx = _labelIndex(raw, const ['จาก', 'From', 'FROM']);
     if (fromIdx < 0) return false;
-    final toIdx = raw.indexOf('ไปยัง');
+    final toIdx = _labelIndex(raw, const ['ไปยัง', 'ไปที่', 'To', 'TO']);
     if (toIdx < 0) return pos >= fromIdx;
     return pos >= fromIdx && pos < toIdx;
   }
 
   bool inReceiverSection(int pos) {
-    final fromLast = raw.lastIndexOf('จาก', pos);
-    final toLast = raw.lastIndexOf('ไปยัง', pos);
+    final fromLast = _labelLastIndexBefore(
+      raw,
+      pos,
+      const ['จาก', 'From', 'FROM'],
+    );
+    final toLast = _labelLastIndexBefore(
+      raw,
+      pos,
+      const ['ไปยัง', 'ไปที่', 'To', 'TO'],
+    );
     return toLast >= 0 && toLast > fromLast;
   }
 

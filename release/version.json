@@ -3,17 +3,17 @@
   "released_at": "2026-07-26",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.14",
+    "version": "0.9.15",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Reject ref-fragment shop last4 / amounts"
+    "notes": "Fix amount cents false-reject as ref fragment; match baht integer only"
   },
   "android": {
-    "version": "0.9.9+32",
+    "version": "0.9.9+33",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "Fix คัดลอกยอด/คัดลอกบัญชี; never use รหัสอ้างอิง digits as จาก last4 (6900 not 7268)"
+    "notes": "Restore amount fallback when Thai จำนวนเงิน label missing (Latin OCR)"
   },
   "extension": {
     "version": "1.0.41",

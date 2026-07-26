@@ -185,6 +185,30 @@ x6900
       expect(parsed.errors, contains('amount_invalid'));
     });
 
+    test('Latin-only OCR without Thai จำนวนเงิน still extracts amount + จาก', () {
+      // ML Kit is Latin-only — Thai labels often missing. Must not require
+      // จำนวนเงิน or the amount column goes blank and close-job fails.
+      const raw = '''
+SCB Easy
+Transfer successful
+26 Jul 2026 - 08:55
+Ref
+202607268XRZLCrFvm0JLRag6
+From
+xxx-xxx690-0
+To
+xxx-xxx175-6
+3,727.00
+THB
+''';
+      final parsed = ScbParser().parse(raw);
+      expect(parsed.amount, 3727.00);
+      expect(parsed.errors, isNot(contains('amount_invalid')));
+      expect(parsed.senderAccountLast4, '6900');
+      expect(parsed.senderAccountLast4, isNot(equals('7268')));
+      expect(parsed.receiverAccountLast4, '1756');
+    });
+
     test('keeps masked shop last4 when ref also contains those digits', () {
       // No จาก/ไปยัง labels — rely on first masked token as shop account.
       // SCB dash grouping xxx-xxx726-8 → last4 7268 (same pattern as 690-0 → 6900).

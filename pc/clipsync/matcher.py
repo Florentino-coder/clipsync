@@ -141,7 +141,10 @@ def _ocr_amount_looks_like_ref_fragment(ocr: Mapping[str, Any]) -> bool:
     amount = ocr.get("amount")
     if amount is None:
         return False
-    digits_only = "".join(ch for ch in str(amount).strip().replace(",", "") if ch.isdigit())
+    # Baht integer digits only — avoid str(100.0) → "1000" false positives.
+    raw = str(amount).strip().replace(",", "")
+    int_part = raw.split(".", 1)[0]
+    digits_only = "".join(ch for ch in int_part if ch.isdigit())
     return len(digits_only) >= 4 and digits_only in ref_text
 
 

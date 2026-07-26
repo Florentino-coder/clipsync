@@ -527,3 +527,18 @@ def test_correct_amount_still_matches_with_alphanumeric_ref():
     result = match_order(ocr_good, orders, CFG, used_refs=set())
     assert result is not None
     assert result["order_id"] == "w-3727"
+
+
+def test_float_amount_cents_not_treated_as_ref_fragment():
+    """str(100.0) digits must not become '1000' and false-reject vs ref."""
+    ref = "202607261000XRZLCrFvm0JLRag6"
+    ocr = {
+        "amount": 100.0,
+        "ref_number": ref,
+        "receiver_account_last4": "1756",
+        "ocr_confidence": 0.95,
+    }
+    orders = [{"order_id": "w-100", "amount": 100.0, "account_last4": "1756"}]
+    result = match_order(ocr, orders, CFG, used_refs=set())
+    assert result is not None
+    assert result["order_id"] == "w-100"
