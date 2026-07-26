@@ -276,7 +276,71 @@
   }
 
   /**
+   * True when the node (and ancestors) look interactable — skips inactive Bootstrap /
+   * Element tab panes that still keep a 「ค้นหา」 button in the DOM.
+   */
+  function isUsableSearchButton(el) {
+    if (!el || el.disabled) return false;
+    let node = el;
+    while (node && node.nodeType === 1) {
+      try {
+        if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') return false;
+        if (node.hasAttribute && node.hasAttribute('hidden')) return false;
+      } catch (_) {
+        /* ignore */
+      }
+      if (node.classList) {
+        if (node.classList.contains('d-none')) return false;
+        // Bootstrap / BootstrapVue inactive panes
+        if (
+          node.classList.contains('tab-pane') &&
+          !node.classList.contains('active') &&
+          !node.classList.contains('show')
+        ) {
+          return false;
+        }
+        // Element UI / similar
+        if (node.classList.contains('el-tab-pane') && node.style && node.style.display === 'none') {
+          return false;
+        }
+      }
+      try {
+        const view = node.ownerDocument && node.ownerDocument.defaultView;
+        if (view && typeof view.getComputedStyle === 'function') {
+          const style = view.getComputedStyle(node);
+          if (style && (style.display === 'none' || style.visibility === 'hidden')) {
+            return false;
+          }
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      node = node.parentElement;
+    }
+    try {
+      if (typeof el.getBoundingClientRect === 'function') {
+        const rect = el.getBoundingClientRect();
+        if (rect && (rect.width < 1 || rect.height < 1)) return false;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  }
+
+  function searchButtonInActivePane(el) {
+    if (!el || !el.closest) return false;
+    try {
+      if (el.closest('.tab-pane.active, .tab-pane.show, .el-tab-pane.is-active')) return true;
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  }
+
+  /**
    * Find Jinbao filter 「ค้นหา」 button (not 「ล้าง」).
+   * Prefers the visible / active-pane button — Jinbao keeps multiple tab forms in DOM.
    */
   function findApprovedSearchButton(profile, doc) {
     const document = getDocument(doc);
@@ -315,20 +379,60 @@
         .trim();
     }
 
+    const matches = [];
     for (const el of candidates) {
       const label = labelOf(el);
       if (!label) continue;
       const norm = normalize(label).toLowerCase();
       if (exclude.some((x) => norm.includes(normalize(String(x)).toLowerCase()))) continue;
       if (texts.some((t) => norm.includes(normalize(String(t)).toLowerCase()))) {
-        return el;
+        matches.push(el);
       }
     }
-    return null;
+    if (!matches.length) return null;
+
+    const usable = matches.filter(isUsableSearchButton);
+    const pool = usable.length ? usable : matches;
+    const inActive = pool.filter(searchButtonInActivePane);
+    return (inActive[0] || pool[0]) || null;
+  }
+
+  /**
+   * Native submit / force-click for BootstrapVue 「ค้นหา」 (isolated-world fallback).
+   */
+  function clickApprovedSearchButton(btn) {
+    if (!btn) return false;
+    const isSubmit =
+      String(btn.type || '').toLowerCase() === 'submit' ||
+      (btn.tagName &&
+        String(btn.tagName).toLowerCase() === 'input' &&
+        String(btn.type || '').toLowerCase() === 'submit');
+    let submitted = false;
+    if (isSubmit && btn.form && typeof btn.form.requestSubmit === 'function') {
+      try {
+        btn.form.requestSubmit(btn);
+        submitted = true;
+      } catch (_) {
+        /* fall through to forceClick */
+      }
+    }
+    // Always deliver a pointer/click sequence — Vue @click / @submit.prevent often
+    // ignores a bare requestSubmit from the extension isolated world.
+    const forced = typeof forceClick === 'function' ? forceClick(btn) : false;
+    if (!forced && !submitted) {
+      try {
+        btn.click();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
    * Click ค้นหา on approved tab only — preserves filters (no reload / no ล้าง).
+   * Prefers MAIN-world click so Jinbao Vue actually refreshes the results table.
    * @param {{ confirmInFlight?: boolean }} [opts]
    */
   function maybeClickApprovedSearch(profile, doc, opts) {
@@ -345,14 +449,18 @@
     const btn = findApprovedSearchButton(profile, document);
     if (!btn) return { clicked: false, reason: 'no_button' };
     try {
-      const isSubmit =
-        String(btn.type || '').toLowerCase() === 'submit' ||
-        (btn.tagName && String(btn.tagName).toLowerCase() === 'input' &&
-          String(btn.type || '').toLowerCase() === 'submit');
-      if (isSubmit && btn.form && typeof btn.form.requestSubmit === 'function') {
-        btn.form.requestSubmit(btn);
-      } else {
-        btn.click();
+      // MAIN world first (same pattern as SweetAlert2) — isolated click reported
+      // success on Jinbao without updating 「พบ: N รายการ」.
+      if (typeof mainWorldApprovedSearchClicker === 'function') {
+        try {
+          mainWorldApprovedSearchClicker();
+          return { clicked: true, reason: 'clicked' };
+        } catch (_) {
+          /* fall through */
+        }
+      }
+      if (!clickApprovedSearchButton(btn)) {
+        return { clicked: false, reason: 'click_failed' };
       }
       return { clicked: true, reason: 'clicked' };
     } catch (_) {
@@ -786,10 +894,17 @@
   // content script registers a CSP-safe clicker that asks the background service
   // worker to run chrome.scripting.executeScript({ world: 'MAIN', func }).
   let mainWorldClicker = null;
+  /** MAIN-world clicker for Jinbao 「ค้นหา」 (Vue form submit). */
+  let mainWorldApprovedSearchClicker = null;
 
   /** content-script.js registers a fn that triggers a MAIN-world Swal click. */
   function setMainWorldClicker(fn) {
     mainWorldClicker = typeof fn === 'function' ? fn : null;
+  }
+
+  /** content-script.js registers a fn that triggers MAIN-world approved Search click. */
+  function setMainWorldApprovedSearchClicker(fn) {
+    mainWorldApprovedSearchClicker = typeof fn === 'function' ? fn : null;
   }
 
   /**
@@ -3142,6 +3257,8 @@
     waitForPostClickVerify,
     dismissMessageBox,
     setMainWorldClicker,
+    setMainWorldApprovedSearchClicker,
+    isUsableSearchButton,
     BUSY_SHIELD_ID,
     BUSY_SHIELD_DEFAULT_TIMEOUT_MS,
     showBusyShield,

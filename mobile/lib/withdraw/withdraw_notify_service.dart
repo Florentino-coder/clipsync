@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -387,23 +388,28 @@ class WithdrawNotifyService {
     });
   }
 
-  /// If the app was launched by tapping a withdraw notification, open inbox.
+  /// If the app was launched by tapping a withdraw notification (body or copy
+  /// action with [showsUserInterface]), run the same handler as a live tap.
+  ///
+  /// Copy actions must NOT be skipped: with `showsUserInterface: true`, Android
+  /// often cold-starts the UI and delivers the action only via launch details —
+  /// the background isolate may never reliably write the clipboard.
   Future<void> handleLaunchDetails() async {
     await init();
     final details = await _plugin.getNotificationAppLaunchDetails();
     if (details?.didNotificationLaunchApp != true) return;
     final response = details!.notificationResponse;
     if (response == null) return;
-    // Only body taps open inbox (copy actions already handled separately).
-    final actionId = response.actionId;
-    if (actionId != null && actionId.isNotEmpty) return;
     await _handleAction(response);
   }
 }
 
 @pragma('vm:entry-point')
 void withdrawNotifyBackgroundResponse(NotificationResponse response) {
+  // Background isolate — register plugins or Clipboard.setData is a no-op on
+  // many OEM builds when the UI process was not already alive.
   WidgetsFlutterBinding.ensureInitialized();
+  DartPluginRegistrant.ensureInitialized();
   final actionId = response.actionId;
   if (actionId == null || actionId.isEmpty) return;
   final text = resolveWithdrawCopyText(
@@ -411,5 +417,6 @@ void withdrawNotifyBackgroundResponse(NotificationResponse response) {
     payload: response.payload,
   );
   if (text == null || text.isEmpty) return;
-  Clipboard.setData(ClipboardData(text: text));
+  // Fire-and-forget; isolate may be torn down after return.
+  unawaited(Clipboard.setData(ClipboardData(text: text)));
 }

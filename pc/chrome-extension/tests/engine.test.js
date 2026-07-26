@@ -2017,6 +2017,74 @@ describe('approved Search refresh (กดค้นหา)', () => {
     assert.equal(submitted, 1);
   });
 
+  it('findApprovedSearchButton prefers ค้นหา in active tab-pane over hidden pane', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body>
+        <div class="el-tabs__item is-active">รายการที่อนุมัติแล้ว</div>
+        <div class="tab-pane" style="display:none">
+          <form><button type="submit" class="btn btn-primary" id="hidden-search">ค้นหา</button></form>
+        </div>
+        <div class="tab-pane active show">
+          <form><button type="submit" class="btn btn-primary" id="visible-search">ค้นหา</button></form>
+        </div>
+      </body>`,
+      { url: 'https://manage.jinbao356.com/withdraw/transaction?tab=1' }
+    );
+    global.document = dom.window.document;
+    // jsdom getComputedStyle may not honor style=display:none on ancestors — mark aria-hidden too
+    document.querySelector('.tab-pane').setAttribute('aria-hidden', 'true');
+    const p = {
+      ...profile,
+      withdraw_notify_tab_query: 'tab=1',
+      approved_search_button_selectors: [
+        'button.btn-primary',
+        'button[type="submit"]',
+        'button',
+      ],
+    };
+    const btn = findApprovedSearchButton(p, document);
+    assert.ok(btn);
+    assert.equal(btn.id, 'visible-search');
+  });
+
+  it('maybeClickApprovedSearch clicks the visible active-pane button not the hidden one', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body>
+        <div class="el-tabs__item is-active">รายการที่อนุมัติแล้ว</div>
+        <div class="tab-pane" aria-hidden="true" style="display:none">
+          <form><button type="submit" class="btn btn-primary" id="hidden-search">ค้นหา</button></form>
+        </div>
+        <div class="tab-pane active show">
+          <form id="approved-form">
+            <button type="submit" class="btn btn-primary" id="visible-search">ค้นหา</button>
+          </form>
+        </div>
+      </body>`,
+      { url: 'https://manage.jinbao356.com/withdraw/transaction?tab=1' }
+    );
+    global.document = dom.window.document;
+    let submittedId = null;
+    const form = document.getElementById('approved-form');
+    form.requestSubmit = (submitter) => {
+      submittedId = submitter && submitter.id;
+    };
+    document.getElementById('hidden-search').form.requestSubmit = () => {
+      submittedId = 'hidden-search';
+    };
+    const p = {
+      ...profile,
+      withdraw_notify_tab_query: 'tab=1',
+      approved_search_button_selectors: [
+        'button.btn-primary',
+        'button[type="submit"]',
+        'button',
+      ],
+    };
+    const result = maybeClickApprovedSearch(p, document);
+    assert.equal(result.clicked, true);
+    assert.equal(submittedId, 'visible-search');
+  });
+
   it('maybeClickApprovedSearch still skips pending tab when URL has tab=1', () => {
     const dom = new JSDOM(
       `<!DOCTYPE html><body>

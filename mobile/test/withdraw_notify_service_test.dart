@@ -153,4 +153,37 @@ void main() {
       '999999999999',
     );
   });
+
+  test('copy action ids are distinct and recognized by resolveWithdrawCopyText', () {
+    expect(kCopyAmountActionId, 'copy_amount');
+    expect(kCopyAccountActionId, 'copy_account');
+    final payload = encodeWithdrawNotifyPayload(
+      orderId: 'ORD-2',
+      amount: '5500.00',
+      account: '0888975152',
+    );
+    // Empty / body tap must not resolve as copy text.
+    expect(
+      resolveWithdrawCopyText(actionId: null, payload: payload),
+      isNull,
+    );
+    expect(
+      resolveWithdrawCopyText(actionId: '', payload: payload),
+      isNull,
+    );
+    expect(
+      resolveWithdrawCopyText(
+        actionId: kCopyAmountActionId,
+        payload: payload,
+      ),
+      '5500.00',
+    );
+    expect(
+      resolveWithdrawCopyText(
+        actionId: kCopyAccountActionId,
+        payload: payload,
+      ),
+      '0888975152',
+    );
+  });
 }

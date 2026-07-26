@@ -38,6 +38,11 @@
   if (typeof E.setMainWorldClicker === 'function') {
     E.setMainWorldClicker(() => sendToBackground({ type: 'main_world_swal_click' }));
   }
+  if (typeof E.setMainWorldApprovedSearchClicker === 'function') {
+    E.setMainWorldApprovedSearchClicker(() =>
+      sendToBackground({ type: 'main_world_approved_search_click' })
+    );
+  }
 
 function showResultBanner(ok, detail) {
     const id = 'clipsync-result-banner';

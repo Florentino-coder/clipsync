@@ -10,14 +10,14 @@
     "notes": "Fix amount cents false-reject as ref fragment; match baht integer only"
   },
   "android": {
-    "version": "0.9.9+34",
+    "version": "0.9.9+35",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "Emoji withdraw notify/inbox; harden shade copy UI; inbox clear-pending button"
+    "notes": "0.9.9+35 fix shade คัดลอกยอด/บัญชี on cold start (launch details + plugin registrant)"
   },
   "extension": {
-    "version": "1.0.44",
+    "version": "1.0.45",
     "download_url": "",
-    "notes": "1.0.43 Search click/Save alert/status; 1.0.44 do not scrape row index as amount"
+    "notes": "1.0.45 click visible approved-tab Search in MAIN world (false clicked on hidden pane)"
   }
 }

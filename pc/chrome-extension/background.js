@@ -338,6 +338,131 @@ function mainWorldSwalClick() {
   if (btn) btn.click();
 }
 
+/**
+ * MAIN-world click of visible Jinbao 「ค้นหา」 — Vue listens here; isolated-world
+ * requestSubmit/click often reports success without refreshing the results table.
+ */
+function mainWorldApprovedSearchClick() {
+  const texts = ['ค้นหา', 'Search'];
+  const exclude = ['ล้าง', 'Clear', 'Reset'];
+  const selectors = [
+    'button.btn.btn-primary',
+    'button.btn-primary',
+    'button[type="submit"]',
+    'button.el-button--primary',
+    'button',
+    'input[type="submit"]',
+  ];
+  const seen = new Set();
+  const nodes = [];
+  for (const sel of selectors) {
+    let list;
+    try {
+      list = document.querySelectorAll(sel);
+    } catch (_) {
+      continue;
+    }
+    for (const el of list) {
+      if (seen.has(el)) continue;
+      seen.add(el);
+      nodes.push(el);
+    }
+  }
+
+  function usable(el) {
+    if (!el || el.disabled) return false;
+    let node = el;
+    while (node && node.nodeType === 1) {
+      if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') return false;
+      if (node.hasAttribute && node.hasAttribute('hidden')) return false;
+      if (node.classList) {
+        if (node.classList.contains('d-none')) return false;
+        if (
+          node.classList.contains('tab-pane') &&
+          !node.classList.contains('active') &&
+          !node.classList.contains('show')
+        ) {
+          return false;
+        }
+      }
+      try {
+        const style = window.getComputedStyle(node);
+        if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+      } catch (_) {
+        /* ignore */
+      }
+      node = node.parentElement;
+    }
+    try {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return false;
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  }
+
+  function labelOf(el) {
+    return String(el.textContent || el.value || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  const matches = nodes.filter((el) => {
+    const label = labelOf(el);
+    if (!label) return false;
+    if (exclude.some((x) => label.includes(x))) return false;
+    return texts.some((t) => label.includes(t));
+  });
+  const usableMatches = matches.filter(usable);
+  const pool = usableMatches.length ? usableMatches : matches;
+  const inActive = pool.filter(
+    (el) => el.closest && el.closest('.tab-pane.active, .tab-pane.show, .el-tab-pane.is-active')
+  );
+  const btn = (inActive[0] || pool[0]) || null;
+  if (!btn) return false;
+
+  try {
+    if (btn.focus) btn.focus();
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    const rect = btn.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const base = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      buttons: 1,
+      clientX: cx,
+      clientY: cy,
+    };
+    btn.dispatchEvent(new MouseEvent('pointerdown', base));
+    btn.dispatchEvent(new MouseEvent('mousedown', base));
+    btn.dispatchEvent(new MouseEvent('pointerup', base));
+    btn.dispatchEvent(new MouseEvent('mouseup', base));
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    const isSubmit = String(btn.type || '').toLowerCase() === 'submit';
+    if (isSubmit && btn.form && typeof btn.form.requestSubmit === 'function') {
+      btn.form.requestSubmit(btn);
+    } else {
+      btn.click();
+    }
+  } catch (_) {
+    try {
+      btn.click();
+    } catch (_) {
+      return false;
+    }
+  }
+  return true;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return;
 
@@ -348,6 +473,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         chrome.scripting.executeScript(
           { target: { tabId, allFrames: true }, world: 'MAIN', func: mainWorldSwalClick },
+          () => void chrome.runtime.lastError
+        );
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message.type === 'main_world_approved_search_click') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (typeof tabId === 'number' && chrome.scripting && chrome.scripting.executeScript) {
+      try {
+        chrome.scripting.executeScript(
+          {
+            target: { tabId, allFrames: true },
+            world: 'MAIN',
+            func: mainWorldApprovedSearchClick,
+          },
           () => void chrome.runtime.lastError
         );
       } catch (_) {
