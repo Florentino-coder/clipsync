@@ -69,6 +69,145 @@ bool refNumberIsValid(
   return RegExp(r'^\d[A-Za-z0-9]+$').hasMatch(ref);
 }
 
+const _amountLabels = ['จำนวนเงิน', 'จำนวน', 'Amount'];
+const _refLabels = [
+  'รหัสอ้างอิง',
+  'เลขที่อ้างอิง',
+  'เลขที่รายการ',
+  'Reference',
+];
+
+/// Parsed ref span in [raw] — used to exclude ref tokens from amount harvest.
+class _RefSpan {
+  final String ref;
+  final int start;
+  final int end;
+
+  const _RefSpan(this.ref, this.start, this.end);
+}
+
+/// True when [token] lies inside the parsed ref span or [refNumber] string.
+bool tokenInsideRef({
+  required String token,
+  required String? refNumber,
+  int tokenStart = -1,
+  int refStart = -1,
+  int refEnd = -1,
+}) {
+  if (refNumber == null || refNumber.isEmpty) return false;
+  if (tokenStart >= 0 && refStart >= 0 && refEnd > refStart) {
+    final tokenEnd = tokenStart + token.length;
+    return tokenStart >= refStart && tokenEnd <= refEnd;
+  }
+  final normalized = token.replaceAll(RegExp(r'[,\.]'), '');
+  return refNumber.contains(normalized);
+}
+
+bool amountLooksLikeRefFragment({
+  required String amountToken,
+  required String? refNumber,
+  int amountStart = -1,
+  int refStart = -1,
+  int refEnd = -1,
+}) {
+  if (refNumber == null || refNumber.isEmpty) return false;
+  if (tokenInsideRef(
+    token: amountToken,
+    refNumber: refNumber,
+    tokenStart: amountStart,
+    refStart: refStart,
+    refEnd: refEnd,
+  )) {
+    return true;
+  }
+  final digitsOnly = amountToken.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digitsOnly.length >= 4 && refNumber.contains(digitsOnly)) {
+    return true;
+  }
+  return false;
+}
+
+_RefSpan? extractRefNumber(
+  String raw, {
+  required int minRefLength,
+  required int maxRefLength,
+}) {
+  _RefSpan? tryMatch(RegExp re, String window, int windowStart) {
+    final match = re.firstMatch(window);
+    if (match == null) return null;
+    final ref = normalizeOcrDigits(match.group(0)!);
+    if (!refNumberIsValid(
+      ref,
+      minRefLength: minRefLength,
+      maxRefLength: maxRefLength,
+    )) {
+      return null;
+    }
+    return _RefSpan(ref, windowStart + match.start, windowStart + match.end);
+  }
+
+  final alphaRe = RegExp(r'[\dOolI]{9,}[A-Za-z0-9]{6,}');
+  final numericRe = RegExp(r'[0-9OolI]{15,25}');
+
+  for (final label in _refLabels) {
+    var searchFrom = 0;
+    while (true) {
+      final idx = raw.indexOf(label, searchFrom);
+      if (idx < 0) break;
+      searchFrom = idx + label.length;
+      final windowEnd = (idx + 120).clamp(0, raw.length);
+      final window = raw.substring(idx, windowEnd);
+      final hit = tryMatch(alphaRe, window, idx) ?? tryMatch(numericRe, window, idx);
+      if (hit != null) return hit;
+    }
+  }
+
+  final alphaHit = tryMatch(alphaRe, raw, 0);
+  if (alphaHit != null) return alphaHit;
+  return tryMatch(numericRe, raw, 0);
+}
+
+double? extractAmountNearLabel(
+  String raw, {
+  required String? refNumber,
+  int refStart = -1,
+  int refEnd = -1,
+}) {
+  final amountRe = RegExp(r'([\d,]+\.\d{2})');
+
+  for (final label in _amountLabels) {
+    var searchFrom = 0;
+    while (true) {
+      final idx = raw.indexOf(label, searchFrom);
+      if (idx < 0) break;
+      searchFrom = idx + label.length;
+      final windowEnd = (idx + 120).clamp(0, raw.length);
+      final window = raw.substring(idx, windowEnd);
+      for (final match in amountRe.allMatches(window)) {
+        final token = match.group(1)!;
+        final absStart = idx + match.start;
+        if (amountLooksLikeRefFragment(
+          amountToken: token,
+          refNumber: refNumber,
+          amountStart: absStart,
+          refStart: refStart,
+          refEnd: refEnd,
+        )) {
+          continue;
+        }
+        final lineStart = raw.lastIndexOf('\n', absStart) + 1;
+        final linePrefix = raw.substring(lineStart, absStart);
+        if (linePrefix.contains('ค่าธรรมเนียม') || linePrefix.contains('Fee')) {
+          continue;
+        }
+        final amount = double.tryParse(token.replaceAll(',', ''));
+        if (amount != null && amount > 0) return amount;
+      }
+    }
+  }
+  return null;
+}
+
 /// True when [tmpl] is a masked account template (has mask glyphs), not a bare
 /// digit run that could be ref leakage.
 bool isRealMaskedAccountTemplate(String? tmpl) {
@@ -124,34 +263,25 @@ ParsedSlip parseSlipFields(
 }) {
   final errors = <String>[];
 
-  double? amount;
-  final amountMatch = RegExp(r'([\d,]+\.\d{2})').firstMatch(raw);
-  if (amountMatch != null) {
-    amount = double.tryParse(amountMatch.group(1)!.replaceAll(',', ''));
-  }
+  final refSpan = extractRefNumber(
+    raw,
+    minRefLength: minRefLength,
+    maxRefLength: maxRefLength,
+  );
+  final ref = refSpan?.ref;
+  final refStart = refSpan?.start ?? -1;
+  final refEnd = refSpan?.end ?? -1;
+
+  final amount = extractAmountNearLabel(
+    raw,
+    refNumber: ref,
+    refStart: refStart,
+    refEnd: refEnd,
+  );
   if (amount == null || amount <= 0) {
     errors.add('amount_invalid');
   }
 
-  String? ref;
-  var refStart = -1;
-  var refEnd = -1;
-  // SCB prints alphanumeric refs (digit date prefix + mixed suffix). Parse
-  // early so we can exclude that span from account-token harvesting.
-  final alphaRefMatch =
-      RegExp(r'[\dOolI]{9,}[A-Za-z0-9]{6,}').firstMatch(raw);
-  if (alphaRefMatch != null) {
-    ref = normalizeOcrDigits(alphaRefMatch.group(0)!);
-    refStart = alphaRefMatch.start;
-    refEnd = alphaRefMatch.end;
-  } else {
-    final refMatch = RegExp(r'[0-9OolI]{15,25}').firstMatch(raw);
-    if (refMatch != null) {
-      ref = normalizeOcrDigits(refMatch.group(0)!);
-      refStart = refMatch.start;
-      refEnd = refMatch.end;
-    }
-  }
   if (!refNumberIsValid(
     ref,
     minRefLength: minRefLength,

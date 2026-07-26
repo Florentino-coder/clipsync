@@ -153,6 +153,38 @@ xxx-xxx175-6
       expect(parsed.receiverAccountLast4, '1756');
     });
 
+    test('SCB alphanumeric รหัสอ้างอิง does not become amount', () {
+      const raw = '''
+SCB Easy
+จำนวนเงิน
+3,727.00
+บาท
+จาก
+xxx-xxx690-0
+ไปยัง
+xxx-xxx175-6
+รหัสอ้างอิง
+202607268XRZLABC12
+''';
+      final parsed = ScbParser().parse(raw);
+      expect(parsed.amount, 3727.00);
+      expect(parsed.refNumber, isNotNull);
+      expect(parsed.refNumber!, startsWith('202607268'));
+      expect(parsed.senderAccountLast4, '6900');
+      expect(parsed.errors, isNot(contains('amount_invalid')));
+    });
+
+    test('rejects ref-shaped token as amount when label missing', () {
+      const raw = '''
+SCB
+รหัสอ้างอิง 202607268XRZLABC12
+x6900
+''';
+      final parsed = ScbParser().parse(raw);
+      expect(parsed.amount, isNull);
+      expect(parsed.errors, contains('amount_invalid'));
+    });
+
     test('keeps masked shop last4 when ref also contains those digits', () {
       // No จาก/ไปยัง labels — rely on first masked token as shop account.
       // SCB dash grouping xxx-xxx726-8 → last4 7268 (same pattern as 690-0 → 6900).
