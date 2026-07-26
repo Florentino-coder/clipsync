@@ -16,8 +16,8 @@
     "notes": "Restore amount fallback when Thai จำนวนเงิน label missing (Latin OCR)"
   },
   "extension": {
-    "version": "1.0.41",
+    "version": "1.0.42",
     "download_url": "",
-    "notes": "Settings: user-configurable pending-orders refresh interval"
+    "notes": "Auto-click ค้นหา on approved tab; red warn against Jinbao 3-min auto-load; separate scrape interval"
   }
 }

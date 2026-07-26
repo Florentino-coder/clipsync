@@ -1,5 +1,5 @@
 /**
- * Pending-orders poll interval settings (pure — no chrome.*).
+ * Poll interval settings (pure — no chrome.*).
  * UMD export for Node tests, content script, and popup.
  */
 
@@ -12,11 +12,27 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function pollSettingsFactory() {
   'use strict';
 
-  function clampPendingOrdersPollMs(value, fallback = 45000) {
+  const DEFAULT_SCRAPE_POLL_MS = 45000;
+  const DEFAULT_APPROVED_SEARCH_POLL_MS = 30000;
+
+  function clampPollMs(value, fallback) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
     return Math.min(300000, Math.max(10000, Math.round(n)));
   }
 
-  return { clampPendingOrdersPollMs };
+  function clampPendingOrdersPollMs(value, fallback = DEFAULT_SCRAPE_POLL_MS) {
+    return clampPollMs(value, fallback);
+  }
+
+  function clampApprovedSearchPollMs(value, fallback = DEFAULT_APPROVED_SEARCH_POLL_MS) {
+    return clampPollMs(value, fallback);
+  }
+
+  return {
+    clampPendingOrdersPollMs,
+    clampApprovedSearchPollMs,
+    DEFAULT_SCRAPE_POLL_MS,
+    DEFAULT_APPROVED_SEARCH_POLL_MS,
+  };
 });

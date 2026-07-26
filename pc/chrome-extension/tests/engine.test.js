@@ -18,6 +18,8 @@ const {
   checkCanary,
   scrapePendingOrders,
   detectWithdrawNotifyTab,
+  findApprovedSearchButton,
+  maybeClickApprovedSearch,
   apiAdapter,
   runWorkflow,
   selectOption,
@@ -1861,5 +1863,71 @@ describe('busy shield', () => {
     // Second call used default long timeout — still present after 60ms.
     assert.ok(document.getElementById(BUSY_SHIELD_ID));
     hideBusyShield(document);
+  });
+});
+
+describe('approved Search refresh (กดค้นหา)', () => {
+  const profile = {
+    profile_id: 'jinbao356_v1',
+    approved_search_button_texts: ['ค้นหา', 'Search'],
+    approved_search_exclude_texts: ['ล้าง', 'Clear', 'Reset'],
+    approved_search_button_selectors: ['button.el-button--primary', 'button'],
+    withdraw_notify_tab_hints: ['รายการที่อนุมัติแล้ว', 'อนุมัติแล้ว'],
+    withdraw_notify_pending_tab_hints: ['รายการรออนุมัติ', 'รออนุมัติ'],
+  };
+
+  beforeEach(() => {
+    const dom = new JSDOM(`<!DOCTYPE html><body>
+      <div class="el-tabs__item is-active">รายการที่อนุมัติแล้ว</div>
+      <form>
+        <input placeholder="ยอดถอนตั้งแต่" value="100" />
+        <input placeholder="ยอดถอนไม่เกิน" value="5000" />
+        <button type="button">ล้าง</button>
+        <button type="button" class="el-button--primary">ค้นหา</button>
+      </form>
+    </body>`);
+    global.document = dom.window.document;
+  });
+
+  it('findApprovedSearchButton returns ค้นหา not ล้าง', () => {
+    const btn = findApprovedSearchButton(profile);
+    assert.ok(btn);
+    assert.match(btn.textContent, /ค้นหา/);
+  });
+
+  it('maybeClickApprovedSearch clicks on approved tab and keeps filter values', () => {
+    let clicks = 0;
+    const btn = findApprovedSearchButton(profile);
+    btn.addEventListener('click', () => {
+      clicks += 1;
+    });
+    const result = maybeClickApprovedSearch(profile);
+    assert.equal(result.clicked, true);
+    assert.equal(clicks, 1);
+    const inputs = [...document.querySelectorAll('input')].map((el) => el.value);
+    assert.deepEqual(inputs, ['100', '5000']);
+  });
+
+  it('maybeClickApprovedSearch skips pending tab', () => {
+    document.querySelector('.el-tabs__item').textContent = 'รายการรออนุมัติ';
+    const result = maybeClickApprovedSearch(profile);
+    assert.equal(result.clicked, false);
+    assert.equal(result.reason, 'wrong_tab');
+  });
+
+  it('maybeClickApprovedSearch skips when busy shield present', () => {
+    showBusyShield({ amount: '1' }, document);
+    const result = maybeClickApprovedSearch(profile);
+    assert.equal(result.clicked, false);
+    assert.equal(result.reason, 'busy');
+    hideBusyShield(document);
+  });
+
+  it('maybeClickApprovedSearch skips when confirmInFlight', () => {
+    const result = maybeClickApprovedSearch(profile, document, {
+      confirmInFlight: true,
+    });
+    assert.equal(result.clicked, false);
+    assert.equal(result.reason, 'confirm_in_flight');
   });
 });

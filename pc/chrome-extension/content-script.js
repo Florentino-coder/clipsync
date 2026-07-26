@@ -9,6 +9,7 @@
 
   /** @type {Promise<void>} */
   let commandQueue = Promise.resolve();
+  let confirmInFlight = false;
 
   function urlMatchesPattern(url, pattern) {
     if (typeof pattern !== 'string' || !pattern) return false;
@@ -113,40 +114,45 @@ function showResultBanner(ok, detail) {
   }
 
   async function handleConfirmOrder(data, profiles) {
-    const orderId = data && data.orderId != null ? String(data.orderId) : '';
-    const amount = data && data.amount != null ? String(data.amount) : '';
-    const refNumber = data && data.refNumber != null ? String(data.refNumber) : '';
-    const eventId = data && data.event_id != null ? String(data.event_id) : '';
-    const profile = profileForConfirm(profiles, orderId);
-    if (!profile) {
-      return { ok: false, reason: 'no_site_profile', event_id: eventId, amount: amount || undefined };
-    }
-
-    if (E.isLoggedOut(profile)) {
-      showSessionBanner();
-      return { ok: false, reason: 'session_expired', event_id: eventId, amount: amount || undefined };
-    }
-
-    const matchKeys = [orderId, refNumber, amount].filter((k) => k && k !== '-' && k !== 'None');
-    if (matchKeys.length === 0) {
-      return { ok: false, reason: 'no_match_key', event_id: eventId, amount: amount || undefined };
-    }
-
-    // Busy shield: dim/blur page + block clicks while automation runs (auto + manual ยืนยันเอง).
-    // Auto-dismisses after ~75s if the engine hangs — never sticks forever.
-    if (typeof E.showBusyShield === 'function') {
-      E.showBusyShield({ amount: amount || undefined });
-    }
+    confirmInFlight = true;
     try {
-      return await runConfirmWithShield(data, profile, {
-        orderId,
-        amount,
-        refNumber,
-        eventId,
-        matchKeys,
-      });
+      const orderId = data && data.orderId != null ? String(data.orderId) : '';
+      const amount = data && data.amount != null ? String(data.amount) : '';
+      const refNumber = data && data.refNumber != null ? String(data.refNumber) : '';
+      const eventId = data && data.event_id != null ? String(data.event_id) : '';
+      const profile = profileForConfirm(profiles, orderId);
+      if (!profile) {
+        return { ok: false, reason: 'no_site_profile', event_id: eventId, amount: amount || undefined };
+      }
+
+      if (E.isLoggedOut(profile)) {
+        showSessionBanner();
+        return { ok: false, reason: 'session_expired', event_id: eventId, amount: amount || undefined };
+      }
+
+      const matchKeys = [orderId, refNumber, amount].filter((k) => k && k !== '-' && k !== 'None');
+      if (matchKeys.length === 0) {
+        return { ok: false, reason: 'no_match_key', event_id: eventId, amount: amount || undefined };
+      }
+
+      // Busy shield: dim/blur page + block clicks while automation runs (auto + manual ยืนยันเอง).
+      // Auto-dismisses after ~75s if the engine hangs — never sticks forever.
+      if (typeof E.showBusyShield === 'function') {
+        E.showBusyShield({ amount: amount || undefined });
+      }
+      try {
+        return await runConfirmWithShield(data, profile, {
+          orderId,
+          amount,
+          refNumber,
+          eventId,
+          matchKeys,
+        });
+      } finally {
+        if (typeof E.hideBusyShield === 'function') E.hideBusyShield();
+      }
     } finally {
-      if (typeof E.hideBusyShield === 'function') E.hideBusyShield();
+      confirmInFlight = false;
     }
   }
 
@@ -337,6 +343,15 @@ function showResultBanner(ok, detail) {
           return Math.min(300000, Math.max(10000, Math.round(n)));
         };
 
+  const clampApprovedSearchPollMs =
+    typeof ClipSyncPollSettings !== 'undefined'
+      ? ClipSyncPollSettings.clampApprovedSearchPollMs
+      : (value, fallback = 30000) => {
+          const n = Number(value);
+          if (!Number.isFinite(n)) return fallback;
+          return Math.min(300000, Math.max(10000, Math.round(n)));
+        };
+
   let scrapeTimer = null;
   function schedulePendingScrape(profiles) {
     if (scrapeTimer) clearTimeout(scrapeTimer);
@@ -373,6 +388,13 @@ function showResultBanner(ok, detail) {
     }
   }
 
+  function runApprovedSearchRefresh(profiles) {
+    if (typeof E.maybeClickApprovedSearch !== 'function') return;
+    for (const profile of activeProfiles(profiles)) {
+      E.maybeClickApprovedSearch(profile, document, { confirmInFlight });
+    }
+  }
+
   function enqueue(fn) {
     commandQueue = commandQueue.then(fn).catch(() => {});
     return commandQueue;
@@ -386,6 +408,7 @@ function showResultBanner(ok, detail) {
   }
 
   let pendingOrdersTimer = null;
+  let approvedSearchTimer = null;
 
   function restartPendingOrdersTimer(profiles, ms) {
     if (pendingOrdersTimer) clearInterval(pendingOrdersTimer);
@@ -393,28 +416,43 @@ function showResultBanner(ok, detail) {
     pendingOrdersTimer = setInterval(() => publishPendingOrders(profiles), interval);
   }
 
-  function startCanaryInterval(profiles, pollMs) {
+  function restartApprovedSearchTimer(profiles, ms) {
+    if (approvedSearchTimer) clearInterval(approvedSearchTimer);
+    const interval = clampApprovedSearchPollMs(ms);
+    approvedSearchTimer = setInterval(() => runApprovedSearchRefresh(profiles), interval);
+  }
+
+  function startCanaryInterval(profiles, pollMs, searchMs) {
     runHealthCheck(profiles);
     setInterval(() => runHealthCheck(profiles), 3 * 60 * 1000);
     restartPendingOrdersTimer(profiles, pollMs);
+    restartApprovedSearchTimer(profiles, searchMs);
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes.pendingOrdersPollMs) return;
+    if (area !== 'local') return;
     chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
       const profiles = siteProfiles || [];
       if (activeProfiles(profiles).length === 0) return;
-      restartPendingOrdersTimer(profiles, changes.pendingOrdersPollMs.newValue);
+      if (changes.pendingOrdersPollMs) {
+        restartPendingOrdersTimer(profiles, changes.pendingOrdersPollMs.newValue);
+      }
+      if (changes.approvedSearchPollMs) {
+        restartApprovedSearchTimer(profiles, changes.approvedSearchPollMs.newValue);
+      }
     });
   });
 
-  chrome.storage.local.get(['siteProfiles', 'pendingOrdersPollMs'], (data) => {
-    const profiles = data.siteProfiles || [];
-    if (activeProfiles(profiles).length === 0) return;
+  chrome.storage.local.get(
+    ['siteProfiles', 'pendingOrdersPollMs', 'approvedSearchPollMs'],
+    (data) => {
+      const profiles = data.siteProfiles || [];
+      if (activeProfiles(profiles).length === 0) return;
 
-    wireObservers(profiles);
-    startCanaryInterval(profiles, data.pendingOrdersPollMs);
-  });
+      wireObservers(profiles);
+      startCanaryInterval(profiles, data.pendingOrdersPollMs, data.approvedSearchPollMs);
+    }
+  );
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== 'confirm_order') return;

@@ -1,5 +1,5 @@
 /**
- * Popup: pairing token, connection status, profile list, per-profile dry_run toggle.
+ * Popup: pairing token, connection status, profile list, poll + search refresh settings.
  */
 
 const statusEl = document.getElementById('status');
@@ -11,6 +11,9 @@ const emptyProfilesEl = document.getElementById('emptyProfiles');
 const pollSecondsEl = document.getElementById('pollSeconds');
 const pollPresetsEl = document.getElementById('pollPresets');
 const savePollBtn = document.getElementById('savePoll');
+const searchSecondsEl = document.getElementById('searchSeconds');
+const searchPresetsEl = document.getElementById('searchPresets');
+const saveSearchPollBtn = document.getElementById('saveSearchPoll');
 
 const clampPendingOrdersPollMs =
   typeof ClipSyncPollSettings !== 'undefined'
@@ -21,15 +24,40 @@ const clampPendingOrdersPollMs =
         return Math.min(300000, Math.max(10000, Math.round(n)));
       };
 
-const DEFAULT_POLL_MS = 45000;
+const clampApprovedSearchPollMs =
+  typeof ClipSyncPollSettings !== 'undefined'
+    ? ClipSyncPollSettings.clampApprovedSearchPollMs
+    : (value, fallback = 30000) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        return Math.min(300000, Math.max(10000, Math.round(n)));
+      };
 
-function msToSeconds(ms) {
-  return Math.round(clampPendingOrdersPollMs(ms) / 1000);
+const DEFAULT_POLL_MS =
+  (typeof ClipSyncPollSettings !== 'undefined' &&
+    ClipSyncPollSettings.DEFAULT_SCRAPE_POLL_MS) ||
+  45000;
+const DEFAULT_SEARCH_POLL_MS =
+  (typeof ClipSyncPollSettings !== 'undefined' &&
+    ClipSyncPollSettings.DEFAULT_APPROVED_SEARCH_POLL_MS) ||
+  30000;
+
+function msToSeconds(ms, clampFn) {
+  return Math.round(clampFn(ms) / 1000);
 }
 
 function renderPollSettings(pendingOrdersPollMs) {
   if (!pollSecondsEl) return;
-  pollSecondsEl.value = String(msToSeconds(pendingOrdersPollMs));
+  pollSecondsEl.value = String(
+    msToSeconds(pendingOrdersPollMs, clampPendingOrdersPollMs)
+  );
+}
+
+function renderSearchSettings(approvedSearchPollMs) {
+  if (!searchSecondsEl) return;
+  searchSecondsEl.value = String(
+    msToSeconds(approvedSearchPollMs, clampApprovedSearchPollMs)
+  );
 }
 
 function savePollSettings() {
@@ -37,6 +65,14 @@ function savePollSettings() {
   const ms = clampPendingOrdersPollMs(sec * 1000);
   chrome.storage.local.set({ pendingOrdersPollMs: ms }, () => {
     renderPollSettings(ms);
+  });
+}
+
+function saveSearchSettings() {
+  const sec = Number(searchSecondsEl.value);
+  const ms = clampApprovedSearchPollMs(sec * 1000);
+  chrome.storage.local.set({ approvedSearchPollMs: ms }, () => {
+    renderSearchSettings(ms);
   });
 }
 
@@ -92,13 +128,24 @@ function escapeHtml(text) {
 
 function refresh() {
   chrome.storage.local.get(
-    ['pairingToken', 'connectionStatus', 'siteProfiles', 'pendingOrdersPollMs'],
+    [
+      'pairingToken',
+      'connectionStatus',
+      'siteProfiles',
+      'pendingOrdersPollMs',
+      'approvedSearchPollMs',
+    ],
     (data) => {
       if (data.pairingToken) tokenEl.value = data.pairingToken;
       renderStatus(data.connectionStatus);
       renderProfiles(data.siteProfiles);
       renderPollSettings(
         data.pendingOrdersPollMs != null ? data.pendingOrdersPollMs : DEFAULT_POLL_MS
+      );
+      renderSearchSettings(
+        data.approvedSearchPollMs != null
+          ? data.approvedSearchPollMs
+          : DEFAULT_SEARCH_POLL_MS
       );
     }
   );
@@ -120,8 +167,20 @@ if (pollPresetsEl) {
   });
 }
 
+if (searchPresetsEl) {
+  searchPresetsEl.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-sec]');
+    if (!btn || !searchSecondsEl) return;
+    searchSecondsEl.value = btn.dataset.sec;
+  });
+}
+
 if (savePollBtn) {
   savePollBtn.addEventListener('click', savePollSettings);
+}
+
+if (saveSearchPollBtn) {
+  saveSearchPollBtn.addEventListener('click', saveSearchSettings);
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -133,6 +192,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes.pendingOrdersPollMs) {
     renderPollSettings(changes.pendingOrdersPollMs.newValue);
+  }
+  if (changes.approvedSearchPollMs) {
+    renderSearchSettings(changes.approvedSearchPollMs.newValue);
   }
 });
 

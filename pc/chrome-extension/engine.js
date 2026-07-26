@@ -275,6 +275,81 @@
     return false;
   }
 
+  /**
+   * Find Jinbao filter 「ค้นหา」 button (not 「ล้าง」).
+   */
+  function findApprovedSearchButton(profile, doc) {
+    const document = getDocument(doc);
+    if (!document) return null;
+    const texts = profile.approved_search_button_texts || ['ค้นหา', 'Search'];
+    const exclude = profile.approved_search_exclude_texts || ['ล้าง', 'Clear', 'Reset'];
+    const selectors = profile.approved_search_button_selectors || [
+      'button.el-button--primary',
+      'button[type="submit"]',
+      'button',
+      'input[type="submit"]',
+      'a.btn',
+    ];
+
+    const seen = new Set();
+    const candidates = [];
+    for (const sel of selectors) {
+      let nodes;
+      try {
+        nodes = document.querySelectorAll(sel);
+      } catch (_) {
+        continue;
+      }
+      for (const el of nodes) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        candidates.push(el);
+      }
+    }
+
+    function labelOf(el) {
+      return String(el.textContent || el.value || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    for (const el of candidates) {
+      const label = labelOf(el);
+      if (!label) continue;
+      const norm = normalize(label).toLowerCase();
+      if (exclude.some((x) => norm.includes(normalize(String(x)).toLowerCase()))) continue;
+      if (texts.some((t) => norm.includes(normalize(String(t)).toLowerCase()))) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Click ค้นหา on approved tab only — preserves filters (no reload / no ล้าง).
+   * @param {{ confirmInFlight?: boolean }} [opts]
+   */
+  function maybeClickApprovedSearch(profile, doc, opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const document = getDocument(doc);
+    if (!document) return { clicked: false, reason: 'no_document' };
+    if (options.confirmInFlight) return { clicked: false, reason: 'confirm_in_flight' };
+    if (document.getElementById(BUSY_SHIELD_ID)) {
+      return { clicked: false, reason: 'busy' };
+    }
+    const tab = detectWithdrawNotifyTab(profile, document);
+    if (tab === false) return { clicked: false, reason: 'wrong_tab' };
+    if (tab !== true) return { clicked: false, reason: 'unknown_tab' };
+    const btn = findApprovedSearchButton(profile, document);
+    if (!btn) return { clicked: false, reason: 'no_button' };
+    try {
+      btn.click();
+      return { clicked: true };
+    } catch (_) {
+      return { clicked: false, reason: 'click_failed' };
+    }
+  }
+
   function scrapePendingOrders(profile, doc) {
     const document = getDocument(doc);
     if (!document) return [];
@@ -2908,6 +2983,8 @@
     scrapePendingOrders,
     detectWithdrawNotifyTab,
     rowAllowsWithdrawNotify,
+    findApprovedSearchButton,
+    maybeClickApprovedSearch,
     outlineButton,
     clickableTarget,
     dispatchClick,

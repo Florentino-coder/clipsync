@@ -25,6 +25,14 @@ globalThis.BUNDLED_SITE_PROFILES = [
       "รออนุมัติ",
       "pending"
     ],
+    "approved_search_button_texts": ["ค้นหา", "Search"],
+    "approved_search_exclude_texts": ["ล้าง", "Clear", "Reset"],
+    "approved_search_button_selectors": [
+      "button.el-button--primary",
+      "button[type=submit]",
+      "button",
+      "input[type=submit]"
+    ],
     "row_selector_hints": [
       "tr.el-table__row",
       ".el-table__body tr",
