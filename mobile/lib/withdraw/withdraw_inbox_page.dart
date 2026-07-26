@@ -92,6 +92,12 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
                 final isActive = order.orderId == activeId;
                 final state = widget.queue.stateOf(order.orderId);
                 final name = order.accountName.trim();
+                final bankLabel = order.bank.trim();
+                final bankNameLine = [
+                  if (bankLabel.isNotEmpty) bankLabel,
+                  if (name.isNotEmpty) name,
+                  _stateLabel(state),
+                ].where((s) => s.isNotEmpty).join(' · ');
 
                 return ListTile(
                   selected: isActive,
@@ -105,33 +111,41 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
                     '฿${order.amount}',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: Text(
-                    [
-                      order.account,
-                      if (name.isNotEmpty) name,
-                      if (order.bank.trim().isNotEmpty) order.bank.trim(),
-                      _stateLabel(state),
-                    ].where((s) => s.isNotEmpty).join(' · '),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      IconButton(
-                        tooltip: 'คัดลอกยอด',
-                        onPressed: canCopy
-                            ? () => _copy('คัดลอกยอดแล้ว', order.amount)
-                            : null,
-                        icon: const Icon(Icons.payments_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'คัดลอกบัญชี',
-                        onPressed: canCopy
-                            ? () => _copy('คัดลอกบัญชีแล้ว', order.account)
-                            : null,
-                        icon: const Icon(Icons.account_balance_wallet_outlined),
+                      Text(order.account),
+                      if (bankNameLine.isNotEmpty) Text(bankNameLine),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: canCopy
+                                ? () => _copy('คัดลอกยอดแล้ว', order.amount)
+                                : null,
+                            child: const Text('คัดลอกยอด'),
+                          ),
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: canCopy
+                                ? () => _copy('คัดลอกบัญชีแล้ว', order.account)
+                                : null,
+                            child: const Text('คัดลอกบัญชี'),
+                          ),
+                        ],
                       ),
                     ],
                   ),
+                  isThreeLine: true,
                   onTap: () => unawaited(_onRowTap(order)),
                 );
               },
