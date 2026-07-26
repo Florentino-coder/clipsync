@@ -90,4 +90,16 @@ void main() {
     expect(body, contains('GSB'));
     expect(body, contains('ทดสอบ'));
   });
+
+  test('payload copy path resolves text without queue', () {
+    final payload = encodeWithdrawNotifyPayload(
+      orderId: 'ORD-1',
+      amount: '1.00',
+      account: '020323427136',
+    );
+    final data = decodeWithdrawNotifyPayload(payload);
+    expect(data, isNotNull);
+    expect(copyTextForAction(kCopyAmountActionId, data!), '1.00');
+    expect(copyTextForAction(kCopyAccountActionId, data), '020323427136');
+  });
 }

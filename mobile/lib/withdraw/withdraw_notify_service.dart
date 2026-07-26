@@ -175,11 +175,17 @@ class WithdrawNotifyService {
       _lastHeadsUp = now;
     }
 
-    final bankLabel = active.bank.trim().isEmpty ? '—' : active.bank.trim();
-    final namePart = active.accountName.trim();
-    final bankNameLine =
-        namePart.isEmpty ? bankLabel : '$bankLabel · $namePart';
-    final body = '฿${active.amount}\n${active.account}\n$bankNameLine';
+    final body = formatWithdrawNotifyBody(
+      amount: active.amount,
+      account: active.account,
+      bank: active.bank,
+      accountName: active.accountName,
+    );
+    final notifyPayload = encodeWithdrawNotifyPayload(
+      orderId: active.orderId,
+      amount: active.amount,
+      account: active.account,
+    );
 
     final canCopy = q.canCopy(active.orderId);
     final actions = canCopy
@@ -225,7 +231,7 @@ class WithdrawNotifyService {
       'รายการถอนใหม่',
       body,
       NotificationDetails(android: androidDetails),
-      payload: active.orderId,
+      payload: notifyPayload,
     );
 
     if (pending.length > 1) {
@@ -249,7 +255,7 @@ class WithdrawNotifyService {
         'รายการถอนรอโอน · ${pending.length} รายการ',
         'แตะเพื่อดูรายการ',
         NotificationDetails(android: summaryAndroid),
-        payload: active.orderId,
+        payload: notifyPayload,
       );
     } else {
       await _plugin.cancel(kWithdrawSummaryNotifyId);
@@ -267,7 +273,9 @@ class WithdrawNotifyService {
     // Body tap (no action) → set active from payload + open inbox.
     if (actionId == null || actionId.isEmpty) {
       final q = withdrawQueueProvider?.call();
-      final orderId = (payload ?? '').trim();
+      final data = decodeWithdrawNotifyPayload(payload);
+      final orderId =
+          data?['order_id']?.trim() ?? (payload ?? '').trim();
       if (q != null && orderId.isNotEmpty) {
         q.setActive(orderId);
         try {
@@ -290,12 +298,18 @@ class WithdrawNotifyService {
       return;
     }
 
-    final q = withdrawQueueProvider?.call();
-    if (q == null) return;
-
-    final text = actionId == kCopyAmountActionId
-        ? q.copyAmountText()
-        : q.copyAccountText();
+    String? text;
+    final data = decodeWithdrawNotifyPayload(payload);
+    if (data != null) {
+      text = copyTextForAction(actionId, data);
+    }
+    if (text == null || text.isEmpty) {
+      final q = withdrawQueueProvider?.call();
+      if (q == null) return;
+      text = actionId == kCopyAmountActionId
+          ? q.copyAmountText()
+          : q.copyAccountText();
+    }
     if (text == null || text.isEmpty) return;
 
     if (_onCopy != null) {
@@ -327,5 +341,11 @@ class WithdrawNotifyService {
 
 @pragma('vm:entry-point')
 void withdrawNotifyBackgroundResponse(NotificationResponse response) {
-  // Queue lives in FGS/main isolates; foreground callback handles copy when alive.
+  final actionId = response.actionId;
+  if (actionId == null || actionId.isEmpty) return;
+  final data = decodeWithdrawNotifyPayload(response.payload);
+  if (data == null) return;
+  final text = copyTextForAction(actionId, data);
+  if (text == null || text.isEmpty) return;
+  Clipboard.setData(ClipboardData(text: text));
 }
