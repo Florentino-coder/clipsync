@@ -1,23 +1,23 @@
 {
   "schema": 1,
-  "released_at": "2026-07-25",
+  "released_at": "2026-07-26",
   "note": "clipsync-v2 TEST pipeline only — production clipsync still uses android-latest on the other repo",
   "pc": {
-    "version": "0.9.13",
+    "version": "0.9.14",
     "installer_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC_Setup.exe",
     "portable_url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSyncPC.exe",
     "required": false,
-    "notes": "Withdraw scrape logs retargeted to approved tab (รายการที่อนุมัติแล้ว); pending รออนุมัติ no longer drives WDRAW."
+    "notes": "Reject ref-fragment shop last4 / amounts"
   },
   "android": {
-    "version": "0.9.8+31",
+    "version": "0.9.9+32",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "CI: patch desugaring into flutter-create Gradle instead of overwriting AGP9-incompatible build.gradle.kts."
+    "notes": "Fix คัดลอกยอด/คัดลอกบัญชี; never use รหัสอ้างอิง digits as จาก last4 (6900 not 7268)"
   },
   "extension": {
-    "version": "1.0.40",
+    "version": "1.0.41",
     "download_url": "",
-    "notes": "withdraw_notify scrapes 「รายการที่อนุมัติแล้ว」 only; excludes 「รายการรออนุมัติ」. Whole-baht amounts + phone≠account."
+    "notes": "Settings: user-configurable pending-orders refresh interval"
   }
 }
