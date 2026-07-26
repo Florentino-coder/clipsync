@@ -91,15 +91,50 @@ void main() {
     expect(body, contains('ทดสอบ'));
   });
 
-  test('payload copy path resolves text without queue', () {
+  test('resolveWithdrawCopyText prefers payload over queue', () {
     final payload = encodeWithdrawNotifyPayload(
       orderId: 'ORD-1',
       amount: '1.00',
       account: '020323427136',
     );
-    final data = decodeWithdrawNotifyPayload(payload);
-    expect(data, isNotNull);
-    expect(copyTextForAction(kCopyAmountActionId, data!), '1.00');
-    expect(copyTextForAction(kCopyAccountActionId, data), '020323427136');
+    expect(
+      resolveWithdrawCopyText(
+        actionId: kCopyAmountActionId,
+        payload: payload,
+        queueAmount: '99.99',
+        queueAccount: '111111111111',
+      ),
+      '1.00',
+    );
+    expect(
+      resolveWithdrawCopyText(
+        actionId: kCopyAccountActionId,
+        payload: payload,
+        queueAmount: '99.99',
+        queueAccount: '111111111111',
+      ),
+      '020323427136',
+    );
+  });
+
+  test('resolveWithdrawCopyText falls back to queue for legacy payload', () {
+    expect(
+      resolveWithdrawCopyText(
+        actionId: kCopyAmountActionId,
+        payload: 'ORD-LEGACY',
+        queueAmount: '5.00',
+        queueAccount: '999999999999',
+      ),
+      '5.00',
+    );
+    expect(
+      resolveWithdrawCopyText(
+        actionId: kCopyAccountActionId,
+        payload: 'ORD-LEGACY',
+        queueAmount: '5.00',
+        queueAccount: '999999999999',
+      ),
+      '999999999999',
+    );
   });
 }

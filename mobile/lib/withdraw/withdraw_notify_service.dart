@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -68,6 +69,29 @@ String? copyTextForAction(String? actionId, Map<String, String> data) {
     return t.isEmpty ? null : t;
   }
   return null;
+}
+
+/// Payload-first copy text for notification actions; queue values are fallback only.
+String? resolveWithdrawCopyText({
+  required String? actionId,
+  required String? payload,
+  String? queueAmount,
+  String? queueAccount,
+}) {
+  if (actionId != kCopyAmountActionId && actionId != kCopyAccountActionId) {
+    return null;
+  }
+  final data = decodeWithdrawNotifyPayload(payload);
+  if (data != null) {
+    final fromPayload = copyTextForAction(actionId, data);
+    if (fromPayload != null && fromPayload.isNotEmpty) return fromPayload;
+  }
+  if (actionId == kCopyAmountActionId) {
+    final t = queueAmount?.trim() ?? '';
+    return t.isEmpty ? null : t;
+  }
+  final t = queueAccount?.trim() ?? '';
+  return t.isEmpty ? null : t;
 }
 
 String formatWithdrawNotifyBody({
@@ -298,18 +322,13 @@ class WithdrawNotifyService {
       return;
     }
 
-    String? text;
-    final data = decodeWithdrawNotifyPayload(payload);
-    if (data != null) {
-      text = copyTextForAction(actionId, data);
-    }
-    if (text == null || text.isEmpty) {
-      final q = withdrawQueueProvider?.call();
-      if (q == null) return;
-      text = actionId == kCopyAmountActionId
-          ? q.copyAmountText()
-          : q.copyAccountText();
-    }
+    final q = withdrawQueueProvider?.call();
+    final text = resolveWithdrawCopyText(
+      actionId: actionId,
+      payload: payload,
+      queueAmount: q?.copyAmountText(),
+      queueAccount: q?.copyAccountText(),
+    );
     if (text == null || text.isEmpty) return;
 
     if (_onCopy != null) {
@@ -341,11 +360,13 @@ class WithdrawNotifyService {
 
 @pragma('vm:entry-point')
 void withdrawNotifyBackgroundResponse(NotificationResponse response) {
+  WidgetsFlutterBinding.ensureInitialized();
   final actionId = response.actionId;
   if (actionId == null || actionId.isEmpty) return;
-  final data = decodeWithdrawNotifyPayload(response.payload);
-  if (data == null) return;
-  final text = copyTextForAction(actionId, data);
+  final text = resolveWithdrawCopyText(
+    actionId: actionId,
+    payload: response.payload,
+  );
   if (text == null || text.isEmpty) return;
   Clipboard.setData(ClipboardData(text: text));
 }
