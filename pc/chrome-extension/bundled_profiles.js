@@ -7,6 +7,8 @@ globalThis.BUNDLED_SITE_PROFILES = [
       "https://manage.jinbao356.com/*"
     ],
     "order_page_url_hint": "/withdraw/transaction",
+    "withdraw_notify_tab_query": "tab=1",
+    "withdraw_notify_pending_tab_query": "tab=0",
     "withdraw_notify_tab_hints": [
       "รายการที่อนุมัติแล้ว",
       "อนุมัติแล้ว",
@@ -28,6 +30,8 @@ globalThis.BUNDLED_SITE_PROFILES = [
     "approved_search_button_texts": ["ค้นหา", "Search"],
     "approved_search_exclude_texts": ["ล้าง", "Clear", "Reset"],
     "approved_search_button_selectors": [
+      "button.btn.btn-primary",
+      "button.btn-primary",
       "button.el-button--primary",
       "button[type=submit]",
       "button",

@@ -20,6 +20,7 @@ const {
   detectWithdrawNotifyTab,
   findApprovedSearchButton,
   maybeClickApprovedSearch,
+  probeApprovedSearchStatus,
   apiAdapter,
   runWorkflow,
   selectOption,
@@ -1929,5 +1930,85 @@ describe('approved Search refresh (กดค้นหา)', () => {
     });
     assert.equal(result.clicked, false);
     assert.equal(result.reason, 'confirm_in_flight');
+  });
+
+  it('detectWithdrawNotifyTab treats URL tab=1 as approved without el-tabs', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body>
+        <form>
+          <button type="submit" class="btn btn-primary">ค้นหา</button>
+        </form>
+      </body>`,
+      { url: 'https://manage.jinbao356.com/withdraw/transaction?tab=1' }
+    );
+    global.document = dom.window.document;
+    const p = {
+      ...profile,
+      withdraw_notify_tab_query: 'tab=1',
+      approved_search_button_selectors: [
+        'button.btn-primary',
+        'button.btn.btn-primary',
+        'button[type="submit"]',
+        'button',
+      ],
+    };
+    assert.equal(detectWithdrawNotifyTab(p, document), true);
+  });
+
+  it('maybeClickApprovedSearch uses form.requestSubmit for BootstrapVue submit', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body>
+        <form id="f">
+          <input placeholder="ยอดถอนตั้งแต่" value="100" />
+          <button type="button">ล้าง</button>
+          <button type="submit" class="btn btn-primary">ค้นหา</button>
+        </form>
+      </body>`,
+      { url: 'https://manage.jinbao356.com/withdraw/transaction?tab=1' }
+    );
+    global.document = dom.window.document;
+    const form = document.getElementById('f');
+    let submitted = 0;
+    form.requestSubmit = () => {
+      submitted += 1;
+    };
+    const p = {
+      ...profile,
+      withdraw_notify_tab_query: 'tab=1',
+      approved_search_button_selectors: [
+        'button.btn-primary',
+        'button.btn.btn-primary',
+        'button[type="submit"]',
+        'button',
+      ],
+    };
+    const btn = findApprovedSearchButton(p, document);
+    assert.ok(btn);
+    assert.equal(btn.type, 'submit');
+    const result = maybeClickApprovedSearch(p, document);
+    assert.equal(result.clicked, true);
+    assert.equal(result.reason, 'clicked');
+    assert.equal(submitted, 1);
+  });
+
+  it('maybeClickApprovedSearch still skips pending tab when URL has tab=1', () => {
+    const dom = new JSDOM(
+      `<!DOCTYPE html><body>
+        <div class="el-tabs__item is-active">รายการรออนุมัติ</div>
+        <form>
+          <button type="submit" class="btn btn-primary">ค้นหา</button>
+        </form>
+      </body>`,
+      { url: 'https://manage.jinbao356.com/withdraw/transaction?tab=1' }
+    );
+    global.document = dom.window.document;
+    const p = {
+      ...profile,
+      withdraw_notify_tab_query: 'tab=1',
+    };
+    assert.equal(detectWithdrawNotifyTab(p, document), false);
+    const result = maybeClickApprovedSearch(p, document);
+    assert.equal(result.clicked, false);
+    assert.equal(result.reason, 'wrong_tab');
   });
 });

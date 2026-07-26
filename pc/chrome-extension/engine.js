@@ -284,6 +284,8 @@
     const texts = profile.approved_search_button_texts || ['ค้นหา', 'Search'];
     const exclude = profile.approved_search_exclude_texts || ['ล้าง', 'Clear', 'Reset'];
     const selectors = profile.approved_search_button_selectors || [
+      'button.btn.btn-primary',
+      'button.btn-primary',
       'button.el-button--primary',
       'button[type="submit"]',
       'button',
@@ -343,11 +345,100 @@
     const btn = findApprovedSearchButton(profile, document);
     if (!btn) return { clicked: false, reason: 'no_button' };
     try {
-      btn.click();
-      return { clicked: true };
+      const isSubmit =
+        String(btn.type || '').toLowerCase() === 'submit' ||
+        (btn.tagName && String(btn.tagName).toLowerCase() === 'input' &&
+          String(btn.type || '').toLowerCase() === 'submit');
+      if (isSubmit && btn.form && typeof btn.form.requestSubmit === 'function') {
+        btn.form.requestSubmit(btn);
+      } else {
+        btn.click();
+      }
+      return { clicked: true, reason: 'clicked' };
     } catch (_) {
       return { clicked: false, reason: 'click_failed' };
     }
+  }
+
+  /**
+   * Probe ค้นหา button + tab without clicking — for popup status UI.
+   */
+  function probeApprovedSearchStatus(profile, doc, opts) {
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const document = getDocument(doc);
+    const href = (() => {
+      try {
+        return String(
+          (document &&
+            document.defaultView &&
+            document.defaultView.location &&
+            document.defaultView.location.href) ||
+            ''
+        );
+      } catch (_) {
+        return '';
+      }
+    })();
+    const intervalSec =
+      options.intervalSec != null
+        ? Number(options.intervalSec)
+        : options.intervalMs != null
+          ? Math.round(Number(options.intervalMs) / 1000)
+          : undefined;
+    const at = options.at || new Date().toISOString();
+
+    if (!document) {
+      return {
+        found: null,
+        reason: 'no_document',
+        detail: '',
+        href,
+        at,
+        intervalSec,
+      };
+    }
+
+    let clickResult = null;
+    if (options.clickResult && typeof options.clickResult === 'object') {
+      clickResult = options.clickResult;
+    } else if (options.doClick) {
+      clickResult = maybeClickApprovedSearch(profile, document, options);
+    }
+
+    const tab = detectWithdrawNotifyTab(profile, document);
+    const btn = findApprovedSearchButton(profile, document);
+    const detail = btn
+      ? String(btn.textContent || btn.value || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+      : '';
+
+    let found = null;
+    let reason = 'probed';
+    if (clickResult) {
+      reason = clickResult.reason || (clickResult.clicked ? 'clicked' : 'probed');
+      if (clickResult.clicked) found = true;
+      else if (reason === 'no_button') found = false;
+      else if (reason === 'wrong_tab' || reason === 'unknown_tab') found = btn ? true : false;
+      else if (reason === 'busy' || reason === 'confirm_in_flight') found = btn ? true : false;
+      else found = Boolean(btn);
+    } else if (tab === false) {
+      reason = 'wrong_tab';
+      found = Boolean(btn);
+    } else if (tab !== true) {
+      reason = 'unknown_tab';
+      found = btn ? true : null;
+    } else if (!btn) {
+      reason = 'no_button';
+      found = false;
+    } else {
+      found = true;
+      reason = 'probed';
+    }
+
+    const out = { found, reason, detail, href, at };
+    if (intervalSec != null && Number.isFinite(intervalSec)) out.intervalSec = intervalSec;
+    return out;
   }
 
   function scrapePendingOrders(profile, doc) {
@@ -2985,6 +3076,7 @@
     rowAllowsWithdrawNotify,
     findApprovedSearchButton,
     maybeClickApprovedSearch,
+    probeApprovedSearchStatus,
     outlineButton,
     clickableTarget,
     dispatchClick,
