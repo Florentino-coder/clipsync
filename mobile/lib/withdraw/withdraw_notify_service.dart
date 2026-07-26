@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +24,62 @@ bool shouldHeadsUp({
   if (wasEmpty) return true;
   if (lastHeadsUp == null) return true;
   return now.difference(lastHeadsUp) >= const Duration(seconds: 4);
+}
+
+String encodeWithdrawNotifyPayload({
+  required String orderId,
+  required String amount,
+  required String account,
+}) {
+  return jsonEncode({
+    'order_id': orderId,
+    'amount': amount,
+    'account': account,
+  });
+}
+
+Map<String, String>? decodeWithdrawNotifyPayload(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return null;
+    String read(String k) => '${decoded[k] ?? ''}'.trim();
+    final out = {
+      'order_id': read('order_id'),
+      'amount': read('amount'),
+      'account': read('account'),
+    };
+    if (out['amount']!.isEmpty && out['account']!.isEmpty) return null;
+    return out;
+  } catch (_) {
+    final id = raw.trim();
+    if (id.isEmpty) return null;
+    return {'order_id': id, 'amount': '', 'account': ''};
+  }
+}
+
+String? copyTextForAction(String? actionId, Map<String, String> data) {
+  if (actionId == kCopyAmountActionId) {
+    final t = data['amount']?.trim() ?? '';
+    return t.isEmpty ? null : t;
+  }
+  if (actionId == kCopyAccountActionId) {
+    final t = data['account']?.trim() ?? '';
+    return t.isEmpty ? null : t;
+  }
+  return null;
+}
+
+String formatWithdrawNotifyBody({
+  required String amount,
+  required String account,
+  required String bank,
+  required String accountName,
+}) {
+  final bankLabel = bank.trim().isEmpty ? '—' : bank.trim();
+  final name = accountName.trim();
+  final bankNameLine = name.isEmpty ? bankLabel : '$bankLabel · $name';
+  return 'ยอด: $amount\nบัญชี: $account\n$bankNameLine';
 }
 
 typedef CopyHandler = Future<void> Function(String actionId, String text);

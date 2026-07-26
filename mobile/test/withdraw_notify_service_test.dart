@@ -47,4 +47,40 @@ void main() {
       isFalse,
     );
   });
+
+  test('encodeWithdrawNotifyPayload round-trips active fields', () {
+    final json = encodeWithdrawNotifyPayload(
+      orderId: 'ORD-1',
+      amount: '1.00',
+      account: '020323427136',
+    );
+    final parsed = decodeWithdrawNotifyPayload(json);
+    expect(parsed?['order_id'], 'ORD-1');
+    expect(parsed?['amount'], '1.00');
+    expect(parsed?['account'], '020323427136');
+  });
+
+  test('copyTextForAction picks amount or account', () {
+    final data = {
+      'order_id': 'ORD-1',
+      'amount': '1.00',
+      'account': '020323427136',
+    };
+    expect(copyTextForAction(kCopyAmountActionId, data), '1.00');
+    expect(copyTextForAction(kCopyAccountActionId, data), '020323427136');
+    expect(copyTextForAction('other', data), isNull);
+  });
+
+  test('formatWithdrawNotifyBody uses brief labels', () {
+    final body = formatWithdrawNotifyBody(
+      amount: '1.00',
+      account: '020323427136',
+      bank: 'GSB',
+      accountName: 'ทดสอบ',
+    );
+    expect(body, contains('ยอด: 1.00'));
+    expect(body, contains('บัญชี: 020323427136'));
+    expect(body, contains('GSB'));
+    expect(body, contains('ทดสอบ'));
+  });
 }
