@@ -1,10 +1,19 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Dart API for native Android withdraw shade notifications (Phase A).
+/// Max individual withdraw notifies in the Android shade (option B).
+const kMaxShadeWithdrawNotifies = 20;
+
+/// Pure helper — newest-first [pending] capped for shade children.
+List<T> takeShadeWithdrawOrders<T>(List<T> pending, {int max = kMaxShadeWithdrawNotifies}) {
+  if (max <= 0) return const [];
+  if (pending.length <= max) return List<T>.from(pending);
+  return pending.take(max).toList(growable: false);
+}
+
+/// Dart API for native Android withdraw shade notifications.
 ///
-/// Copy actions are handled entirely in Kotlin via ClipboardCopyReceiver;
-/// this channel only posts/cancels notifications and reads body-tap launch extras.
+/// Copy actions are handled in Kotlin via ClipboardCopyReceiver.
 class WithdrawNativeNotify {
   WithdrawNativeNotify._();
 
@@ -27,8 +36,28 @@ class WithdrawNativeNotify {
     });
   }
 
-  /// Post (or replace) the detail withdraw notification on Android.
-  /// No-op when the platform plugin is missing.
+  /// Replace shade children with [orders] (max [kMaxShadeWithdrawNotifies]).
+  ///
+  /// Each map: orderId, amount, account, bank, accountName, body, title, canCopy.
+  static Future<void> syncVisible({
+    required List<Map<String, Object?>> orders,
+    String headsUpOrderId = '',
+    int pendingCount = 0,
+  }) async {
+    if (kIsWeb) return;
+    final capped = takeShadeWithdrawOrders(orders);
+    try {
+      await channel.invokeMethod<void>('syncVisible', <String, Object?>{
+        'orders': capped,
+        'headsUpOrderId': headsUpOrderId,
+        'pendingCount': pendingCount > 0 ? pendingCount : capped.length,
+      });
+    } on MissingPluginException {
+      // Desktop/tests without the Android plugin.
+    }
+  }
+
+  /// Post a single detail notify (legacy). Prefer [syncVisible].
   static Future<void> show({
     required String orderId,
     required String amount,
@@ -41,23 +70,22 @@ class WithdrawNativeNotify {
     bool headsUp = true,
     int pendingCount = 1,
   }) async {
-    if (kIsWeb) return;
-    try {
-      await channel.invokeMethod<void>('show', <String, Object?>{
-        'orderId': orderId,
-        'amount': amount,
-        'account': account,
-        'bank': bank,
-        'accountName': accountName,
-        'body': body,
-        'title': title,
-        'canCopy': canCopy,
-        'headsUp': headsUp,
-        'pendingCount': pendingCount,
-      });
-    } on MissingPluginException {
-      // Desktop/tests without the Android plugin registered.
-    }
+    await syncVisible(
+      orders: [
+        <String, Object?>{
+          'orderId': orderId,
+          'amount': amount,
+          'account': account,
+          'bank': bank,
+          'accountName': accountName,
+          'body': body,
+          'title': title,
+          'canCopy': canCopy,
+        },
+      ],
+      headsUpOrderId: headsUp ? orderId : '',
+      pendingCount: pendingCount,
+    );
   }
 
   static Future<void> cancel({int id = 41001}) async {

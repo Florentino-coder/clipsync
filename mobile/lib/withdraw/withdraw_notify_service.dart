@@ -233,12 +233,8 @@ class WithdrawNotifyService {
     }
   }
 
-  /// Sync detail (+ summary when pending > 1) from [q].
+  /// Sync up to [kMaxShadeWithdrawNotifies] native shade children (+ group summary).
   /// Pass [wasEmpty] as the queue empty-state *before* the upsert that triggered sync.
-  ///
-  /// Detail notify (id [kWithdrawDetailNotifyId]) is posted by native Android so
-  /// shade **คัดลอกยอด / คัดลอกบัญชี** copy via BroadcastReceiver without Dart.
-  /// Summary group notify stays on flutter_local_notifications.
   Future<void> syncFromQueue(
     WithdrawQueue q, {
     required bool allowHeadsUp,
@@ -248,14 +244,12 @@ class WithdrawNotifyService {
 
     final pending = q.pending;
     if (pending.isEmpty) {
-      await WithdrawNativeNotify.cancel(id: kWithdrawDetailNotifyId);
+      await WithdrawNativeNotify.syncVisible(orders: const [], pendingCount: 0);
+      await WithdrawNativeNotify.cancelAll();
       await _plugin.cancel(kWithdrawDetailNotifyId);
       await _plugin.cancel(kWithdrawSummaryNotifyId);
       return;
     }
-
-    final active = q.active;
-    if (active == null) return;
 
     final now = _clock();
     final headsUp = allowHeadsUp &&
@@ -268,62 +262,37 @@ class WithdrawNotifyService {
       _lastHeadsUp = now;
     }
 
-    final body = formatWithdrawNotifyBody(
-      amount: active.amount,
-      account: active.account,
-      bank: active.bank,
-      accountName: active.accountName,
-    );
-    final notifyPayload = encodeWithdrawNotifyPayload(
-      orderId: active.orderId,
-      amount: active.amount,
-      account: active.account,
-    );
+    final visible = takeShadeWithdrawOrders(pending);
+    // Newest pending gets heads-up when allowed (pending is newest-first).
+    final headsUpOrderId = headsUp && visible.isNotEmpty ? visible.first.orderId : '';
 
-    final canCopy = q.canCopy(active.orderId);
+    final orderMaps = <Map<String, Object?>>[];
+    for (final o in visible) {
+      orderMaps.add(<String, Object?>{
+        'orderId': o.orderId,
+        'amount': o.amount,
+        'account': o.account,
+        'bank': o.bank,
+        'accountName': o.accountName,
+        'body': formatWithdrawNotifyBody(
+          amount: o.amount,
+          account: o.account,
+          bank: o.bank,
+          accountName: o.accountName,
+        ),
+        'title': 'รายการถอนใหม่',
+        'canCopy': q.canCopy(o.orderId),
+      });
+    }
 
-    // Phase A: native owns detail notification + copy actions.
-    await WithdrawNativeNotify.show(
-      orderId: active.orderId,
-      amount: active.amount,
-      account: active.account,
-      bank: active.bank,
-      accountName: active.accountName,
-      body: body,
-      title: 'รายการถอนใหม่',
-      canCopy: canCopy,
-      headsUp: headsUp,
+    await WithdrawNativeNotify.syncVisible(
+      orders: orderMaps,
+      headsUpOrderId: headsUpOrderId,
       pendingCount: pending.length,
     );
-    // Drop any leftover FLN detail so we don't double-post.
+    // Drop leftover FLN detail/summary — native owns the group now.
     await _plugin.cancel(kWithdrawDetailNotifyId);
-
-    if (pending.length > 1) {
-      final summaryAndroid = AndroidNotificationDetails(
-        kWithdrawChannelId,
-        kWithdrawChannelName,
-        channelDescription: 'Pending withdraw order alerts',
-        importance: Importance.low,
-        priority: Priority.low,
-        groupKey: 'withdraw_pending',
-        setAsGroupSummary: true,
-        styleInformation: InboxStyleInformation(
-          pending.take(5).map((o) => '฿${o.amount} · ${o.account}').toList(),
-          contentTitle: 'รายการถอนรอโอน · ${pending.length} รายการ',
-          summaryText: '${pending.length} รายการ',
-        ),
-        onlyAlertOnce: true,
-      );
-      await _plugin.show(
-        kWithdrawSummaryNotifyId,
-        'รายการถอนรอโอน · ${pending.length} รายการ',
-        'แตะเพื่อดูรายการ',
-        NotificationDetails(android: summaryAndroid),
-        payload: notifyPayload,
-      );
-    } else {
-      await _plugin.cancel(kWithdrawSummaryNotifyId);
-    }
+    await _plugin.cancel(kWithdrawSummaryNotifyId);
   }
 
   void _onNotificationResponse(NotificationResponse response) {

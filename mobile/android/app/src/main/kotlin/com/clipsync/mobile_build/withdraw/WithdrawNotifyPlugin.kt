@@ -41,19 +41,33 @@ class WithdrawNotifyPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                     result.error("bad_args", "map required", null)
                     return
                 }
-                val data = WithdrawalNotifier.NotifyData(
-                    orderId = args.string("orderId"),
-                    amount = args.string("amount"),
-                    account = args.string("account"),
-                    bank = args.string("bank"),
-                    accountName = args.string("accountName"),
-                    body = args.string("body"),
-                    title = args.string("title").ifBlank { "รายการถอนใหม่" },
-                    canCopy = args.bool("canCopy", true),
-                    headsUp = args.bool("headsUp", true),
-                    pendingCount = args.int("pendingCount", 1),
-                )
+                val data = parseNotifyData(args)
                 WithdrawalNotifier.notify(context, data)
+                result.success(null)
+            }
+            "syncVisible" -> {
+                val args = call.arguments as? Map<*, *>
+                if (args == null) {
+                    result.error("bad_args", "map required", null)
+                    return
+                }
+                val rawOrders = args["orders"]
+                val list = mutableListOf<WithdrawalNotifier.NotifyData>()
+                if (rawOrders is List<*>) {
+                    for (item in rawOrders) {
+                        val m = item as? Map<*, *> ?: continue
+                        list.add(parseNotifyData(m))
+                    }
+                }
+                val capped = list.take(WithdrawalNotifier.MAX_VISIBLE)
+                val headsUpOrderId = args.string("headsUpOrderId").ifBlank { null }
+                val pendingCount = args.int("pendingCount", capped.size)
+                WithdrawalNotifier.syncVisible(
+                    context,
+                    capped,
+                    headsUpOrderId,
+                    pendingCount,
+                )
                 result.success(null)
             }
             "cancel" -> {
@@ -78,6 +92,20 @@ class WithdrawNotifyPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             else -> result.notImplemented()
         }
     }
+
+    private fun parseNotifyData(args: Map<*, *>): WithdrawalNotifier.NotifyData =
+        WithdrawalNotifier.NotifyData(
+            orderId = args.string("orderId"),
+            amount = args.string("amount"),
+            account = args.string("account"),
+            bank = args.string("bank"),
+            accountName = args.string("accountName"),
+            body = args.string("body"),
+            title = args.string("title").ifBlank { "รายการถอนใหม่" },
+            canCopy = args.bool("canCopy", true),
+            headsUp = args.bool("headsUp", true),
+            pendingCount = args.int("pendingCount", 1),
+        )
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel?.setMethodCallHandler(null)

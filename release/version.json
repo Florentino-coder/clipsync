@@ -10,10 +10,10 @@
     "notes": "0.9.16 pause Search + request scrape on slip; retry no_match within 4s"
   },
   "android": {
-    "version": "0.9.10+36",
+    "version": "0.9.10+37",
     "url": "https://github.com/Florentino-coder/clipsync-v2/releases/download/slip-test-latest/ClipSync-slip.apk",
     "required": false,
-    "notes": "0.9.10+36 native shade คัดลอกยอด/บัญชี via BroadcastReceiver (Phase A)"
+    "notes": "0.9.10+37 shade shows up to 20 withdraw notifies (group), each with copy actions"
   },
   "extension": {
     "version": "1.0.48",
