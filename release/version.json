@@ -16,8 +16,8 @@
     "notes": "0.9.10+36 native shade คัดลอกยอด/บัญชี via BroadcastReceiver (Phase A)"
   },
   "extension": {
-    "version": "1.0.47",
+    "version": "1.0.48",
     "download_url": "",
-    "notes": "1.0.47 settle after Search scrape; pause/scrape on slip; confirm pause from 1.0.46"
+    "notes": "1.0.48 resume Search ~2s after confirm (was stuck ~2min on พักรีเฟรช)"
   }
 }

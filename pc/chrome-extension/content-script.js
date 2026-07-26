@@ -10,14 +10,24 @@
   /** @type {Promise<void>} */
   let commandQueue = Promise.resolve();
   let confirmInFlight = false;
-  /** Epoch ms — skip กดค้นหา until this time (confirm + short cooldown). */
+  /** Epoch ms — skip กดค้นหา until this time (slip match / brief post-confirm settle). */
   let approvedSearchPauseUntil = 0;
-  const SEARCH_PAUSE_AFTER_CONFIRM_MS = 45000;
-  const SEARCH_PAUSE_WHILE_CONFIRM_MS = 120000;
+  /** Brief settle after confirm so Swal/modal can close — then resume Search immediately. */
+  const SEARCH_PAUSE_AFTER_CONFIRM_MS = 2000;
+  /** While confirm_order sits in the content-script queue (before handler). */
+  const SEARCH_PAUSE_QUEUED_CONFIRM_MS = 5000;
+  /** Default when PC sends pause_approved_search without ms. */
+  const SEARCH_PAUSE_SLIP_DEFAULT_MS = 8000;
 
+  /** Extend pause (never shortens). Used for slip-intake. */
   function pauseApprovedSearch(ms) {
     const until = Date.now() + Math.max(0, Number(ms) || 0);
     if (until > approvedSearchPauseUntil) approvedSearchPauseUntil = until;
+  }
+
+  /** Replace pause end time (can shorten). Used when confirm finishes. */
+  function releaseApprovedSearchPause(cooldownMs) {
+    approvedSearchPauseUntil = Date.now() + Math.max(0, Number(cooldownMs) || 0);
   }
 
   function approvedSearchIsPaused() {
@@ -133,7 +143,8 @@ function showResultBanner(ok, detail) {
 
   async function handleConfirmOrder(data, profiles) {
     confirmInFlight = true;
-    pauseApprovedSearch(SEARCH_PAUSE_WHILE_CONFIRM_MS);
+    // Do NOT arm a long wall-clock pause here — confirmInFlight already blocks Search.
+    // A long pause survived after success and left popup stuck on พักรีเฟรช.
     try {
       const orderId = data && data.orderId != null ? String(data.orderId) : '';
       const amount = data && data.amount != null ? String(data.amount) : '';
@@ -172,8 +183,8 @@ function showResultBanner(ok, detail) {
       }
     } finally {
       confirmInFlight = false;
-      // Keep Search paused briefly so the page settles after modal / Swal closes.
-      pauseApprovedSearch(SEARCH_PAUSE_AFTER_CONFIRM_MS);
+      // Overwrite any leftover slip/confirm pause — resume Search after short settle.
+      releaseApprovedSearchPause(SEARCH_PAUSE_AFTER_CONFIRM_MS);
     }
   }
 
@@ -574,8 +585,8 @@ function showResultBanner(ok, detail) {
     }
 
     if (message.type === 'confirm_order') {
-      // Pause Search as soon as confirm is queued (before the async handler runs).
-      pauseApprovedSearch(SEARCH_PAUSE_WHILE_CONFIRM_MS);
+      // Short pause only while queued — handleConfirmOrder clears to 2s settle on exit.
+      pauseApprovedSearch(SEARCH_PAUSE_QUEUED_CONFIRM_MS);
       chrome.storage.local.get(['siteProfiles'], ({ siteProfiles }) => {
         enqueue(async () => {
           const resp = await handleConfirmOrder(message, siteProfiles || []);
@@ -588,7 +599,9 @@ function showResultBanner(ok, detail) {
     // Optional: PC/bridge can ask to pause Search while a slip is being matched.
     if (message.type === 'pause_approved_search') {
       const ms = Number(message.ms);
-      pauseApprovedSearch(Number.isFinite(ms) && ms > 0 ? ms : SEARCH_PAUSE_WHILE_CONFIRM_MS);
+      pauseApprovedSearch(
+        Number.isFinite(ms) && ms > 0 ? ms : SEARCH_PAUSE_SLIP_DEFAULT_MS
+      );
       sendResponse({ ok: true, until: approvedSearchPauseUntil });
       return true;
     }
