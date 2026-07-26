@@ -152,6 +152,24 @@ xxx-xxx175-6
       expect(parsed.senderAccountLast4, isNot('7268'));
       expect(parsed.receiverAccountLast4, '1756');
     });
+
+    test('keeps masked shop last4 when ref also contains those digits', () {
+      // No จาก/ไปยัง labels — rely on first masked token as shop account.
+      // SCB dash grouping xxx-xxx726-8 → last4 7268 (same pattern as 690-0 → 6900).
+      const raw = '''
+SCB
+รหัสอ้างอิง
+202607268XRZLCrFvm0JLRag6
+xxx-xxx726-8
+xxx-xxx175-6
+จำนวนเงิน
+500.00
+''';
+      final parsed = ScbParser().parse(raw);
+      expect(parsed.senderAccountLast4, '7268');
+      expect(parsed.senderAccountLast4, isNotNull);
+      expect(parsed.receiverAccountLast4, '1756');
+    });
   });
 
   group('KbankParser', () {

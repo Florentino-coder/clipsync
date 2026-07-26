@@ -74,6 +74,17 @@ def test_resolve_rejects_ref_only_explicit_last4():
     assert resolve_sender_account_last4(event) == "6900"
 
 
+def test_resolve_keeps_masked_last4_when_ref_contains_same_digits():
+    from clipsync.slip_ocr import resolve_sender_account_last4
+
+    event = {
+        "ref_number": "202607268XRZLCrFvm0JLRag6",
+        "sender_account_last4": "7268",
+        "sender_account_masked": "xxxxxx7268",
+    }
+    assert resolve_sender_account_last4(event) == "7268"
+
+
 def test_extract_returns_none_without_ocr_backend():
     # No/blank image bytes must never raise and must return None (fail-safe).
     assert extract_sender_account_last4(b"") is None

@@ -69,6 +69,13 @@ bool refNumberIsValid(
   return RegExp(r'^\d[A-Za-z0-9]+$').hasMatch(ref);
 }
 
+/// True when [tmpl] is a masked account template (has mask glyphs), not a bare
+/// digit run that could be ref leakage.
+bool isRealMaskedAccountTemplate(String? tmpl) {
+  if (tmpl == null || tmpl.isEmpty) return false;
+  return RegExp(r'[xX\*\u2022\u00d7\u25cf]').hasMatch(tmpl);
+}
+
 /// True when [last4] only appears inside [refNumber] and is not the last4 of
 /// a จาก-bound account token (masked or full).
 bool senderLast4IsRefOnly({
@@ -288,8 +295,11 @@ ParsedSlip parseSlipFields(
     }
   }
 
-  final fromBoundLast4 =
-      last4Of(maskedInSenderSection()) ?? last4Of(fullInSenderSection());
+  final fromBoundLast4 = last4Of(maskedInSenderSection()) ??
+      last4Of(fullInSenderSection()) ??
+      (isRealMaskedAccountTemplate(senderMasked)
+          ? last4Of(senderMasked)
+          : null);
   var senderLast4 = last4Of(senderMasked);
   if (ref != null &&
       senderLast4 != null &&

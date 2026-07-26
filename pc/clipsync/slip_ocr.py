@@ -60,6 +60,15 @@ def _ref_number_from_text(text: str) -> str:
     return digits.group(0) if digits else ""
 
 
+def _from_bound_last4_from_masked(masked: Optional[str]) -> Optional[str]:
+    if not masked:
+        return None
+    s = str(masked)
+    if re.search(rf"[{_MASK}]", s):
+        return _last4_from_token(s)
+    return None
+
+
 def _sender_last4_is_ref_only(
     last4: str,
     ref_number: str,
@@ -207,7 +216,8 @@ def resolve_sender_account_last4(
     ref_number = str(event.get("ref_number") or event.get("refNumber") or "")
 
     masked = event.get("sender_account_masked") or event.get("senderAccountMasked")
-    masked_last4 = _last4_from_token(str(masked)) if masked else None
+    from_bound_last4 = _from_bound_last4_from_masked(masked)
+    masked_last4 = from_bound_last4
 
     last4 = str(event.get("sender_account_last4") or "").strip()
     if not last4 and event.get("senderAccountLast4"):
@@ -215,11 +225,11 @@ def resolve_sender_account_last4(
     digits = "".join(ch for ch in last4 if ch.isdigit())
     if len(digits) >= 4:
         resolved = digits[-4:]
-        if not _sender_last4_is_ref_only(resolved, ref_number, masked_last4):
+        if not _sender_last4_is_ref_only(resolved, ref_number, from_bound_last4):
             return resolved
 
     if masked_last4:
-        if not _sender_last4_is_ref_only(masked_last4, ref_number, masked_last4):
+        if not _sender_last4_is_ref_only(masked_last4, ref_number, from_bound_last4):
             return masked_last4
 
     thumb = thumbnail_jpeg_b64
@@ -234,7 +244,7 @@ def resolve_sender_account_last4(
             if raw_img:
                 ocr_last4 = extract_sender_account_last4(raw_img)
                 if ocr_last4 and not _sender_last4_is_ref_only(
-                    ocr_last4, ref_number, masked_last4
+                    ocr_last4, ref_number, from_bound_last4
                 ):
                     return ocr_last4
         except Exception:
