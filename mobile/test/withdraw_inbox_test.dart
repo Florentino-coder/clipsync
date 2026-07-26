@@ -67,7 +67,10 @@ void main() {
         },
       ),
     ));
-    await tester.tap(find.text('คัดลอกยอด'));
+    final amountBtn = find.widgetWithText(TextButton, 'คัดลอกยอด');
+    await tester.ensureVisible(amountBtn);
+    expect(tester.widget<TextButton>(amountBtn).onPressed, isNotNull);
+    await tester.tap(amountBtn);
     await tester.pumpAndSettle();
     expect(copiedText, '100.00');
     expect(copiedLabel, 'คัดลอกยอดแล้ว');
@@ -94,7 +97,10 @@ void main() {
         },
       ),
     ));
-    await tester.tap(find.text('คัดลอกบัญชี'));
+    final accountBtn = find.widgetWithText(TextButton, 'คัดลอกบัญชี');
+    await tester.ensureVisible(accountBtn);
+    expect(tester.widget<TextButton>(accountBtn).onPressed, isNotNull);
+    await tester.tap(accountBtn);
     await tester.pumpAndSettle();
     expect(copiedText, '4774090171');
     expect(copiedLabel, 'คัดลอกบัญชีแล้ว');

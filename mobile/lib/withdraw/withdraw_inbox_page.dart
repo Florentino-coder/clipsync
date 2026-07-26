@@ -43,8 +43,8 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
   }
 
   Future<void> _copy(String label, String text) async {
-    await Clipboard.setData(ClipboardData(text: text));
     widget.onCopied?.call(label, text);
+    await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     if (widget.onCopied == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -127,7 +127,9 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
                               ),
                             ),
                             onPressed: canCopy
-                                ? () => _copy('คัดลอกยอดแล้ว', order.amount)
+                                ? () => unawaited(
+                                      _copy('คัดลอกยอดแล้ว', order.amount),
+                                    )
                                 : null,
                             child: const Text('คัดลอกยอด'),
                           ),
@@ -139,7 +141,9 @@ class _WithdrawInboxPageState extends State<WithdrawInboxPage> {
                               ),
                             ),
                             onPressed: canCopy
-                                ? () => _copy('คัดลอกบัญชีแล้ว', order.account)
+                                ? () => unawaited(
+                                      _copy('คัดลอกบัญชีแล้ว', order.account),
+                                    )
                                 : null,
                             child: const Text('คัดลอกบัญชี'),
                           ),
