@@ -48,6 +48,32 @@ def test_empty_and_none():
     assert parse_sender_last4_from_text(None) is None
 
 
+def test_rejects_ref_digits_as_sender_last4():
+    text = "\n".join(
+        [
+            "รหัสอ้างอิง",
+            "202607268XRZLCrFvm0JLRag6",
+            "จาก",
+            "xxx-xxx690-0",
+            "ไปยัง",
+            "xxx-xxx175-6",
+            "จำนวนเงิน 3,727.00",
+        ]
+    )
+    assert parse_sender_last4_from_text(text) == "6900"
+
+
+def test_resolve_rejects_ref_only_explicit_last4():
+    from clipsync.slip_ocr import resolve_sender_account_last4
+
+    event = {
+        "ref_number": "202607268XRZLCrFvm0JLRag6",
+        "sender_account_last4": "7268",
+        "sender_account_masked": "xxxxxx6900",
+    }
+    assert resolve_sender_account_last4(event) == "6900"
+
+
 def test_extract_returns_none_without_ocr_backend():
     # No/blank image bytes must never raise and must return None (fail-safe).
     assert extract_sender_account_last4(b"") is None

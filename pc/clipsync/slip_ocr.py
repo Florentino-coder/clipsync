@@ -52,6 +52,26 @@ def _last4_from_token(token: str) -> Optional[str]:
     return None
 
 
+def _ref_number_from_text(text: str) -> str:
+    alpha = re.search(r"[\dOolI]{9,}[A-Za-z0-9]{6,}", text)
+    if alpha:
+        return alpha.group(0)
+    digits = re.search(r"[0-9OolI]{15,25}", text)
+    return digits.group(0) if digits else ""
+
+
+def _sender_last4_is_ref_only(
+    last4: str,
+    ref_number: str,
+    from_bound_last4: Optional[str],
+) -> bool:
+    if not last4 or not ref_number:
+        return False
+    if from_bound_last4 and last4 == from_bound_last4:
+        return False
+    return last4 in ref_number
+
+
 def parse_sender_last4_from_text(text: Optional[str]) -> Optional[str]:
     """Return the payer account's last 4 digits from raw slip OCR text.
 
@@ -63,6 +83,8 @@ def parse_sender_last4_from_text(text: Optional[str]) -> Optional[str]:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lines:
         return None
+
+    ref_number = _ref_number_from_text(text)
 
     start = None
     for i, ln in enumerate(lines):
@@ -84,8 +106,15 @@ def parse_sender_last4_from_text(text: Optional[str]) -> Optional[str]:
                 # Looks like an amount (1,067.00) — skip.
                 continue
             last4 = _last4_from_token(tok)
-            if last4:
-                return last4
+            if not last4:
+                continue
+            # Ref tokens can contain mask-like "X" and digit runs — never treat
+            # unmasked digit runs that also appear in the ref as shop accounts.
+            if ref_number and last4 in ref_number and not re.search(
+                rf"[{_MASK}]", tok
+            ):
+                continue
+            return last4
     return None
 
 
@@ -175,18 +204,23 @@ def resolve_sender_account_last4(
 
     Order: explicit last4 → masked trailing digits → optional thumbnail OCR.
     """
+    ref_number = str(event.get("ref_number") or event.get("refNumber") or "")
+
+    masked = event.get("sender_account_masked") or event.get("senderAccountMasked")
+    masked_last4 = _last4_from_token(str(masked)) if masked else None
+
     last4 = str(event.get("sender_account_last4") or "").strip()
     if not last4 and event.get("senderAccountLast4"):
         last4 = str(event.get("senderAccountLast4")).strip()
     digits = "".join(ch for ch in last4 if ch.isdigit())
     if len(digits) >= 4:
-        return digits[-4:]
+        resolved = digits[-4:]
+        if not _sender_last4_is_ref_only(resolved, ref_number, masked_last4):
+            return resolved
 
-    masked = event.get("sender_account_masked") or event.get("senderAccountMasked")
-    if masked:
-        masked_digits = "".join(ch for ch in str(masked) if ch.isdigit())
-        if len(masked_digits) >= 4:
-            return masked_digits[-4:]
+    if masked_last4:
+        if not _sender_last4_is_ref_only(masked_last4, ref_number, masked_last4):
+            return masked_last4
 
     thumb = thumbnail_jpeg_b64
     if not thumb:
@@ -199,7 +233,9 @@ def resolve_sender_account_last4(
             raw_img = decode_thumbnail_jpeg(thumb)
             if raw_img:
                 ocr_last4 = extract_sender_account_last4(raw_img)
-                if ocr_last4:
+                if ocr_last4 and not _sender_last4_is_ref_only(
+                    ocr_last4, ref_number, masked_last4
+                ):
                     return ocr_last4
         except Exception:
             return None

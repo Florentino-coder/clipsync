@@ -112,6 +112,46 @@ void main() {
       expect(ScbParser().matches('SCB Easy slip'), isTrue);
       expect(ScbParser().matches('random text no slip'), isFalse);
     });
+
+    test('SCB: จาก last4 is 6900 not 7268 from รหัสอ้างอิง', () {
+      const raw = '''
+โอนเงินสำเร็จ
+26 ก.ค. 2569 - 08:55
+รหัสอ้างอิง
+202607268XRZLCrFvm0JLRag6
+จาก
+นางสาว กัญญาภรณ์ ศ.
+xxx-xxx690-0
+ไปยัง
+นางสาว พัชลี ศรีสุวรรณ
+xxx-xxx175-6
+จำนวนเงิน
+3,727.00
+''';
+      final parsed = ScbParser().parse(raw);
+      expect(parsed.amount, 3727.00);
+      expect(parsed.senderAccountLast4, '6900'); // shop จาก — NOT 7268
+      expect(parsed.senderAccountLast4, isNot(equals('7268')));
+      expect(parsed.receiverAccountLast4, '1756');
+      expect(parsed.refNumber, contains('202607268'));
+    });
+
+    test('rejects shop last4 that only appears inside ref', () {
+      const raw = '''
+รหัสอ้างอิง
+202607268XRZLCrFvm0JLRag6
+จาก
+xxx-xxx690-0
+ไปยัง
+xxx-xxx175-6
+จำนวนเงิน
+3,727.00
+''';
+      final parsed = ScbParser().parse(raw);
+      expect(parsed.senderAccountLast4, '6900');
+      expect(parsed.senderAccountLast4, isNot('7268'));
+      expect(parsed.receiverAccountLast4, '1756');
+    });
   });
 
   group('KbankParser', () {
