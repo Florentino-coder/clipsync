@@ -11,6 +11,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'clip_service.dart';
+import 'relay_failover.dart';
 import 'update_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -26,7 +27,9 @@ class _HomeScreenState extends State<HomeScreen> {
   WebSocket? _fallbackWs;
   Timer? _fallbackRetryTimer;
   Timer? _fallbackHeartbeatTimer;
+  final _fallbackRelaySelector = RelaySelector(kRelayUrls);
   int _fallbackRetryStep = 0;
+  bool _fallbackReconnectScheduled = false;
   bool _running = false;
   bool _pcOnline = false;
   bool _fallbackActive = false;
@@ -37,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _lastClip = '';
   String _status = 'Not connected';
   String _targetId = '';
+  String _activeRelayUrl = kRelayUrl;
 
   @override
   void initState() {
@@ -50,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     FlutterForegroundTask.removeTaskDataCallback(_onData);
     _fallbackRetryTimer?.cancel();
+    _fallbackReconnectScheduled = false;
     _fallbackHeartbeatTimer?.cancel();
     _fallbackWs?.close();
     _ctrl.dispose();
@@ -146,6 +151,11 @@ class _HomeScreenState extends State<HomeScreen> {
     } else if (type == 'debug') {
       final message = msg['message'] as String? ?? '';
       if (message.isNotEmpty) _addEvent(message);
+    } else if (type == 'relay') {
+      final url = msg['url'] as String? ?? '';
+      if (url.isNotEmpty && mounted) {
+        setState(() => _activeRelayUrl = url);
+      }
     }
   }
 
@@ -296,15 +306,20 @@ class _HomeScreenState extends State<HomeScreen> {
     if (targetId.isEmpty || !_running) return;
 
     _fallbackRetryTimer?.cancel();
+    _fallbackRetryTimer = null;
     await _fallbackWs?.close();
     _addEvent('Fallback connecting');
 
     try {
+      final url = _fallbackRelaySelector.current;
       final ws = await WebSocket.connect(
-        kRelayUrl,
+        url,
       ).timeout(const Duration(seconds: 10));
       _fallbackWs = ws;
       _fallbackRetryStep = 0;
+      _fallbackReconnectScheduled = false;
+      _activeRelayUrl = url;
+      _addEvent('Fallback connected $url');
       ws.add(jsonEncode({'action': 'subscribe', 'target': targetId}));
       _startFallbackHeartbeat(ws);
       _addEvent('Fallback subscribe ${fmtId(targetId)}');
@@ -355,22 +370,32 @@ class _HomeScreenState extends State<HomeScreen> {
         },
         onDone: () {
           _addEvent('Fallback socket closed');
-          _scheduleFallbackReconnect();
+          _handleFallbackFailure(ws);
         },
         onError: (Object e) {
           _addEvent('Fallback socket error: $e');
-          _scheduleFallbackReconnect();
+          _handleFallbackFailure(ws);
         },
         cancelOnError: true,
       );
     } catch (e) {
       _addEvent('Fallback connect error: $e');
-      _scheduleFallbackReconnect();
+      _handleFallbackFailure();
     }
+  }
+
+  void _handleFallbackFailure([WebSocket? socket]) {
+    if (!_running || !_fallbackActive || _targetId.isEmpty) return;
+    if (socket != null && _fallbackWs != socket) return;
+    if (_fallbackReconnectScheduled) return;
+    _fallbackRelaySelector.failed();
+    _scheduleFallbackReconnect();
   }
 
   void _scheduleFallbackReconnect() {
     if (!_running || !_fallbackActive || _targetId.isEmpty) return;
+    if (_fallbackReconnectScheduled) return;
+    _fallbackReconnectScheduled = true;
     _fallbackHeartbeatTimer?.cancel();
     _fallbackRetryTimer?.cancel();
     final delay = nextReconnectDelay(_fallbackRetryStep);
@@ -379,6 +404,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _addEvent('Fallback reconnect in ${delay}s');
     _fallbackRetryTimer = Timer(Duration(seconds: delay), () {
+      _fallbackReconnectScheduled = false;
       _connectFallbackSocket(_targetId);
     });
   }
@@ -389,7 +415,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _fallbackHeartbeatTimer?.cancel();
     _fallbackHeartbeatTimer = null;
     _fallbackActive = false;
+    _fallbackReconnectScheduled = false;
     _fallbackRetryStep = 0;
+    _fallbackRelaySelector.reset();
+    _activeRelayUrl = kRelayUrl;
     await _fallbackWs?.close();
     _fallbackWs = null;
   }
@@ -402,7 +431,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ws.add(jsonEncode({'action': 'heartbeat', 'role': 'phone'}));
       } catch (e) {
         _addEvent('Fallback heartbeat error: $e');
-        _scheduleFallbackReconnect();
+        _handleFallbackFailure(ws);
       }
     });
   }
@@ -764,7 +793,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Relay: $kRelayUrl',
+                        'Relay: $_activeRelayUrl',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

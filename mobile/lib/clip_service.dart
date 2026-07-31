@@ -10,11 +10,17 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'relay_failover.dart';
+
 // Configure this with your relay WebSocket URL.
 // Examples:
 // - ws://YOUR_VPS_IP:8765
 // - wss://clipsync-relay.onrender.com
-const kRelayUrl = 'wss://clipsync-relay.onrender.com';
+const kRelayUrls = [
+  'wss://clipsync-relay-ko3c.onrender.com',
+  'wss://clipsync-relay.onrender.com',
+];
+const kRelayUrl = kRelayUrls[0];
 const kAppVersion = '0.8.9+20';
 const kAuthorName = 'Florentino356';
 const kReconnectSteps = [2, 5, 10, 30, 60];
@@ -96,7 +102,10 @@ class ClipTaskHandler extends TaskHandler {
   bool _connecting = false;
   Timer? _retryTimer;
   int _retryStep = 0;
+  late final RelaySelector _relaySelector = RelaySelector(kRelayUrls);
   int _lastHeartbeatMs = 0;
+
+  String get _currentRelayUrl => _relaySelector.current;
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
@@ -115,11 +124,13 @@ class ClipTaskHandler extends TaskHandler {
     try {
       _connecting = true;
       await _ws?.close();
-      _sendDebug('service connecting $kRelayUrl');
+      final url = _currentRelayUrl;
+      _sendDebug('service connecting $url');
       _ws = await WebSocket.connect(
-        kRelayUrl,
+        url,
       ).timeout(const Duration(seconds: 10));
       _retryStep = 0;
+      FlutterForegroundTask.sendDataToMain({'type': 'relay', 'url': url});
 
       _ws!.add(jsonEncode({'action': 'subscribe', 'target': _targetId}));
       _lastHeartbeatMs = DateTime.now().millisecondsSinceEpoch;
@@ -207,11 +218,16 @@ class ClipTaskHandler extends TaskHandler {
   void _retry() {
     if (!_alive) return;
     _retryTimer?.cancel();
+    _relaySelector.failed();
     final delay = nextReconnectDelay(_retryStep);
     if (_retryStep < kReconnectSteps.length - 1) {
       _retryStep += 1;
     }
-    _sendDebug('service reconnect in ${delay}s');
+    _sendDebug('service reconnect in ${delay}s (url: $_currentRelayUrl)');
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'relay',
+      'url': _currentRelayUrl,
+    });
     _retryTimer = Timer(Duration(seconds: delay), _connect);
   }
 
