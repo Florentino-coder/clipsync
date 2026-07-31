@@ -20,7 +20,7 @@ const kRelayUrls = [
   'wss://clipsync-relay-ko3c.onrender.com',
   'wss://clipsync-relay.onrender.com',
 ];
-const kRelayUrl = kRelayUrls[0];
+const kRelayUrl = 'wss://clipsync-relay-ko3c.onrender.com';
 const kAppVersion = '0.8.9+20';
 const kAuthorName = 'Florentino356';
 const kReconnectSteps = [2, 5, 10, 30, 60];
