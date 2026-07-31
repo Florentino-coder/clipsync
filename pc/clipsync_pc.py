@@ -38,7 +38,7 @@ except Exception:  # pragma: no cover - used only when Tk is unavailable.
     ttk = None
 
 APP_NAME = "ClipSync PC"
-APP_VERSION = "0.8.3"
+APP_VERSION = "0.8.4"
 AUTHOR_NAME = "Florentino356"
 DEFAULT_RELAY_URLS = [
     "wss://clipsync-relay-ko3c.onrender.com",

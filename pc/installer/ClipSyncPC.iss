@@ -1,5 +1,5 @@
 #define MyAppName "ClipSync PC"
-#define MyAppVersion "0.8.2"
+#define MyAppVersion "0.8.4"
 #define MyAppPublisher "Florentino356"
 #define MyAppExeName "ClipSyncPC.exe"
 
